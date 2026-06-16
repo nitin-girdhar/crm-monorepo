@@ -1,0 +1,138 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: crm
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: services/auth-service/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: '4001'
+    ports:
+      - '4001:4001'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  users-service:
+    build:
+      context: .
+      dockerfile: services/users-service/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: '4002'
+    ports:
+      - '4002:4002'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  leads-service:
+    build:
+      context: .
+      dockerfile: services/leads-service/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: '4003'
+    ports:
+      - '4003:4003'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  assignments-service:
+    build:
+      context: .
+      dockerfile: services/assignments-service/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: '4004'
+    ports:
+      - '4004:4004'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  analytics-service:
+    build:
+      context: .
+      dockerfile: services/analytics-service/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: '4005'
+    ports:
+      - '4005:4005'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  activities-service:
+    build:
+      context: .
+      dockerfile: services/activities-service/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: '4006'
+    ports:
+      - '4006:4006'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: '4000'
+    ports:
+      - '4000:4000'
+    depends_on:
+      - auth-service
+      - users-service
+      - leads-service
+      - assignments-service
+      - analytics-service
+      - activities-service
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: '3000'
+    ports:
+      - '3000:3000'
+    depends_on:
+      - api-gateway
+
+volumes:
+  pgdata:

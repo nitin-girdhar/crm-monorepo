@@ -1,0 +1,36 @@
+{
+  "name": "@crm/web",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev --port 3000",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "lint": "next lint",
+    "clean": "rimraf .next"
+  },
+  "dependencies": {
+    "ag-grid-community": "^35.3.0",
+    "ag-grid-react": "^35.3.0",
+    "@crm/auth-constants": "workspace:*",
+    "@crm/permissions": "workspace:*",
+    "@crm/types": "workspace:*",
+    "jose": "^6.2.3",
+    "next": "^15.2.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "swr": "^2.3.3",
+    "xlsx": "^0.18.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^22.10.10",
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.0.3",
+    "rimraf": "^6.0.1",
+    "tailwindcss": "^4",
+    "typescript": "^5.7.3"
+  }
+}
