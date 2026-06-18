@@ -3,7 +3,7 @@ RUN npm install -g pnpm@9.15.0
 WORKDIR /app
 
 FROM base AS deps
-COPY package.json pnpm-workspace.yaml ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/types/package.json packages/types/
 COPY packages/auth-constants/package.json packages/auth-constants/
 COPY packages/permissions/package.json packages/permissions/
@@ -16,8 +16,8 @@ FROM deps AS builder
 COPY tsconfig.base.json ./
 COPY packages/ packages/
 COPY services/assignments-service/ services/assignments-service/
-RUN pnpm --filter @crm/types build
 RUN pnpm --filter @crm/auth-constants build
+RUN pnpm --filter @crm/types build
 RUN pnpm --filter @crm/permissions build
 RUN pnpm --filter @crm/db build
 RUN pnpm --filter @crm/validation build

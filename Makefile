@@ -1,8 +1,9 @@
-.PHONY: dev dev-infra dev-services stop build install migrate seed-admin seed-data lint typecheck clean clean-all help
+.PHONY: dev dev-infra dev-services stop build install migrate seed-admin seed-data lint typecheck test clean clean-all help db-shell build-docker up down logs
 
 # ── Variables ──────────────────────────────────────────────────────────────────
 COMPOSE := docker compose
-PNPM := pnpm
+PNPM    := pnpm
+DB_URL  ?= postgres://postgres:postgres@localhost:5432/crm
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -15,21 +16,21 @@ install: ## Install all workspace dependencies
 dev: install dev-infra ## Start the full stack locally (Postgres + all services + web)
 	$(PNPM) turbo dev --concurrency 16
 
-dev-infra: ## Postgres is external (crm-postgres on :5433) — nothing to start
-	@echo "Using external PostgreSQL container crm-postgres on port 5433"
+dev-infra: ## Start Postgres in Docker and wait until healthy
+	$(COMPOSE) up -d --wait postgres
 
 dev-services: install ## Start all backend services and the API gateway
 	$(PNPM) turbo dev --filter='!web' --concurrency 12
 
 # ── Database ───────────────────────────────────────────────────────────────────
-migrate: ## Run database migrations
-	$(PNPM) tsx scripts/migrate.ts
+migrate: ## Run database migrations (db_scripts/init-db.sql)
+	psql $(DB_URL) -f db_scripts/init-db.sql
 
-seed-admin: ## Seed the super-admin user
-	$(PNPM) tsx scripts/seed-admin.ts
+seed-admin: ## Seed demo tenants, orgs, users, and leads (db_scripts/init-seed.sql)
+	psql $(DB_URL) -f db_scripts/init-seed.sql
 
-seed-data: ## Seed demo tenants, orgs, users, campaigns, and leads
-	$(PNPM) tsx scripts/seed-data.ts
+seed-data: ## Seed demo tenants, orgs, users, and leads (db_scripts/init-seed.sql)
+	psql $(DB_URL) -f db_scripts/init-seed.sql
 
 db-shell: ## Open a psql shell in the Postgres container
 	$(COMPOSE) exec postgres psql -U postgres -d crm

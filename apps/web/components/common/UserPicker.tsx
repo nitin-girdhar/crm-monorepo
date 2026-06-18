@@ -13,7 +13,7 @@ interface Props {
   hasError?: boolean;
   allowEmpty?: boolean;
   emptyLabel?: string;
-  extraOption?: { id: string; label: string };
+  extraOption?: { id: string; label: string } | undefined;
 }
 
 export default function UserPicker({

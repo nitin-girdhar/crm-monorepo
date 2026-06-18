@@ -3,7 +3,7 @@ RUN npm install -g pnpm@9.15.0
 WORKDIR /app
 
 FROM base AS deps
-COPY package.json pnpm-workspace.yaml ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/db/package.json packages/db/
 COPY services/activities-service/package.json services/activities-service/
 RUN pnpm install --frozen-lockfile
@@ -23,5 +23,5 @@ COPY --from=builder /app/packages/db/dist ./packages/db/dist
 COPY --from=builder /app/services/activities-service/dist ./services/activities-service/dist
 COPY packages/db/package.json ./packages/db/
 COPY services/activities-service/package.json ./services/activities-service/
-EXPOSE 4005
+EXPOSE 4006
 CMD ["node", "services/activities-service/dist/server.js"]
