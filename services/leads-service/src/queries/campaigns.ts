@@ -1,4 +1,5 @@
-import { withOrgTx, withServiceTx } from '@crm/db';
+import { withRoleTx, withServiceTx } from '@crm/db';
+import type { RoleTxContext } from '@crm/db';
 
 const CAMPAIGN_SELECT = `
   SELECT ac.id, ac.org_id, ac.name, ac.budget, ac.started_at, ac.ended_at, ac.created_at, ac.updated_at,
@@ -11,8 +12,14 @@ const CAMPAIGN_SELECT = `
   WHERE NOT ac.is_deleted
 `;
 
-export async function listCampaigns(org_id: string, user_id: string) {
-  return withOrgTx(org_id, user_id, async (tx) => {
+export async function listCampaigns(
+  org_id: string,
+  user_id: string,
+  role = 'org_admin',
+  tenant_id = '',
+) {
+  const ctx: RoleTxContext = { role, org_id, tenant_id, user_id };
+  return withRoleTx(ctx, async (tx) => {
     return tx.unsafe(
       `${CAMPAIGN_SELECT} AND ac.org_id = $1
        GROUP BY ac.id, mp.name, cs.name, cs.id, mp.id
@@ -22,8 +29,15 @@ export async function listCampaigns(org_id: string, user_id: string) {
   });
 }
 
-export async function getCampaignById(org_id: string, user_id: string, campaign_id: string) {
-  return withOrgTx(org_id, user_id, async (tx) => {
+export async function getCampaignById(
+  org_id: string,
+  user_id: string,
+  campaign_id: string,
+  role = 'org_admin',
+  tenant_id = '',
+) {
+  const ctx: RoleTxContext = { role, org_id, tenant_id, user_id };
+  return withRoleTx(ctx, async (tx) => {
     const rows = await tx.unsafe(
       `${CAMPAIGN_SELECT} AND ac.org_id = $1 AND ac.id = $2
        GROUP BY ac.id, mp.name, cs.name, cs.id, mp.id`,

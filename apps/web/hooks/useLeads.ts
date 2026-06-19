@@ -15,7 +15,7 @@ function sortNewestFirst(list: LeadView[]): LeadView[] {
 
 interface UseLeadsReturn {
   leads: LeadView[];
-  stats: { total: number; lastUpdated: Date | null };
+  stats: { total: number; lastUpdated: Date | null; serverTotal: number };
   loading: boolean;
   error: string | null;
   statusOptions: string[];
@@ -30,6 +30,7 @@ interface UseLeadsReturn {
 
 export function useLeads(orgIds?: string[], platforms?: string[]): UseLeadsReturn {
   const [leads, setLeads]           = useState<LeadView[]>([]);
+  const [serverTotal, setServerTotal] = useState(0);
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -60,7 +61,7 @@ export function useLeads(orgIds?: string[], platforms?: string[]): UseLeadsRetur
         return;
       }
 
-      const params: Parameters<typeof leadsApi.list>[0] = {};
+      const params: Parameters<typeof leadsApi.list>[0] = { page_size: 500 };
       if (ids?.length)   params.org_ids   = ids.join(',');
       if (plats?.length) params.platforms = plats.join(',');
       const data = await leadsApi.list(params);
@@ -91,6 +92,7 @@ export function useLeads(orgIds?: string[], platforms?: string[]): UseLeadsRetur
       setStageOutcomes(rawOutcomes);
       setStageIdToName(idToName);
       setLeads(sortNewestFirst(data.leads));
+      setServerTotal(typeof data.total === 'number' ? data.total : data.leads.length);
       setLastUpdated(new Date());
       setError(null);
     } catch (err) {
@@ -150,7 +152,7 @@ export function useLeads(orgIds?: string[], platforms?: string[]): UseLeadsRetur
 
   return {
     leads,
-    stats: { total: leads.length, lastUpdated },
+    stats: { total: leads.length, lastUpdated, serverTotal },
     loading,
     error,
     statusOptions,

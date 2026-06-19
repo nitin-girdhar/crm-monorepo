@@ -66,7 +66,7 @@ See `.env.example` for the full list. Required keys:
 - `DATABASE_URL_TENANT` — tenant_admin connection
 - `DATABASE_URL_SERVICE` — service_role connection (BYPASSRLS)
 - `JWT_SECRET` — HS256 signing secret (same value across all services)
-- `BCRYPT_ROUNDS` — password hashing cost (default 12)
+- `BCRYPT_ROUNDS` — password hashing cost, required integer (recommended: 12)
 
 ## Tech stack
 

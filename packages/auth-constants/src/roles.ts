@@ -45,3 +45,17 @@ export const AUTH_ROUTES = {
   login: '/login',
   dashboard: '/dashboard/leads',
 } as const;
+
+// Maps each application role to the PostgreSQL role that enforces the correct
+// RLS scope.  Used by withRoleTx() in @crm/db to select the right connection
+// pool and SET LOCAL ROLE statement.
+export const APP_ROLE_TO_PG_ROLE = {
+  read_only:               'app_user',
+  sales_representative:    'app_user',
+  senior_sales_executive:  'app_user',
+  org_manager:             'app_user',
+  org_sr_manager:          'app_user',
+  org_admin:               'app_user',
+  tenant_admin:            'tenant_admin',
+  super_admin:             'crm_service',
+} as const satisfies Record<UserRole, 'app_user' | 'tenant_admin' | 'crm_service'>;

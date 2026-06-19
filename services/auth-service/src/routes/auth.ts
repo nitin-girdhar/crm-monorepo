@@ -47,6 +47,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       role: db_user.role_name as never,
       rank: db_user.rank,
       org_id: db_user.org_id,
+      tenant_id: db_user.tenant_id,
       pwd_iat,
     });
 
@@ -153,6 +154,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       role: db_user.role_name as never,
       rank: db_user.rank,
       org_id: db_user.org_id,
+      tenant_id: db_user.tenant_id,
       pwd_iat,
     });
 

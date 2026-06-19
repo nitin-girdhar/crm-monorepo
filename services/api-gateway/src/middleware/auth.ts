@@ -31,6 +31,7 @@ export async function authPreHandler(
     user_id: payload.sub,
     user_role: payload.role,
     org_id: payload.org_id,
+    tenant_id: payload.tenant_id,
     rank: String(payload.rank),
   };
 }

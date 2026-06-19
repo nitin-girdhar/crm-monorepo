@@ -1,5 +1,5 @@
-import { withOrgTx } from '@crm/db';
-import type { SqlParams } from '@crm/db';
+import { withRoleTx } from '@crm/db';
+import type { SqlParams, RoleTxContext } from '@crm/db';
 import type { CreateLeadInput, UpdateLeadInput } from '@crm/validation';
 
 function coerceTags(val: unknown): string[] | null {
@@ -9,8 +9,15 @@ function coerceTags(val: unknown): string[] | null {
   return null;
 }
 
-export async function createLead(org_id: string, user_id: string, data: CreateLeadInput) {
-  return withOrgTx(org_id, user_id, async (tx) => {
+export async function createLead(
+  org_id: string,
+  user_id: string,
+  data: CreateLeadInput,
+  role = 'org_admin',
+  tenant_id = '',
+) {
+  const ctx: RoleTxContext = { role, org_id, tenant_id, user_id };
+  return withRoleTx(ctx, async (tx) => {
     const stage_rows = await tx.unsafe(
       `SELECT id FROM lead_stage WHERE name = 'new' LIMIT 1`,
     );
@@ -86,8 +93,11 @@ export async function updateLead(
   user_id: string,
   lead_id: string,
   data: UpdateLeadInput,
+  role = 'org_admin',
+  tenant_id = '',
 ) {
-  return withOrgTx(org_id, user_id, async (tx) => {
+  const ctx: RoleTxContext = { role, org_id, tenant_id, user_id };
+  return withRoleTx(ctx, async (tx) => {
     if (data.assigned_user_id !== undefined && data.assigned_user_id !== null) {
       const rows = await tx.unsafe(
         `SELECT can_assign_to($1::uuid, $2::uuid, $3::uuid) AS allowed`,
@@ -160,8 +170,15 @@ export async function updateLead(
   });
 }
 
-export async function deleteLead(org_id: string, user_id: string, lead_id: string) {
-  return withOrgTx(org_id, user_id, async (tx) => {
+export async function deleteLead(
+  org_id: string,
+  user_id: string,
+  lead_id: string,
+  role = 'org_admin',
+  tenant_id = '',
+) {
+  const ctx: RoleTxContext = { role, org_id, tenant_id, user_id };
+  return withRoleTx(ctx, async (tx) => {
     await tx.unsafe(
       `UPDATE marketing_leads
        SET is_deleted = TRUE, deleted_at = CLOCK_TIMESTAMP(), deleted_by = $1::uuid
@@ -176,8 +193,11 @@ export async function createInteraction(
   user_id: string,
   lead_id: string,
   data: { interaction_type_name?: string | undefined; notes?: string | undefined; occurred_at?: string | undefined },
+  role = 'org_admin',
+  tenant_id = '',
 ) {
-  return withOrgTx(org_id, user_id, async (tx) => {
+  const ctx: RoleTxContext = { role, org_id, tenant_id, user_id };
+  return withRoleTx(ctx, async (tx) => {
     let interaction_type_id: string | null = null;
     if (data.interaction_type_name) {
       const type_rows = await tx.unsafe(

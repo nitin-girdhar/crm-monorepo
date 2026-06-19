@@ -9,6 +9,7 @@ export function toSessionUser(row: DatabaseUser): SessionUser {
     rank: row.rank,
     org_id: row.org_id,
     org_name: row.org_name,
+    tenant_id: row.tenant_id,
     tenant_name: row.tenant_name,
     role_label: row.role_label,
     name: row.full_name,

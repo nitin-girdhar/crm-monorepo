@@ -1,5 +1,5 @@
-import { withOrgTx } from '@crm/db';
-import type { SqlParams } from '@crm/db';
+import { withRoleTx } from '@crm/db';
+import type { SqlParams, RoleTxContext } from '@crm/db';
 
 export async function createFollowUp(
   org_id: string,
@@ -10,8 +10,11 @@ export async function createFollowUp(
     scheduled_at: string;
     notes?: string | undefined;
   },
+  role = 'org_admin',
+  tenant_id = '',
 ) {
-  return withOrgTx(org_id, user_id, async (tx) => {
+  const ctx: RoleTxContext = { role, org_id, tenant_id, user_id };
+  return withRoleTx(ctx, async (tx) => {
     const rows = await tx.unsafe(
       `INSERT INTO lead_follow_ups (org_id, lead_id, assigned_user_id, scheduled_at, notes)
        VALUES ($1, $2, $3, $4, $5)
@@ -27,8 +30,11 @@ export async function updateFollowUp(
   user_id: string,
   follow_up_id: string,
   data: { status_name?: string | undefined; completed_at?: string | undefined; scheduled_at?: string | undefined; notes?: string | undefined },
+  role = 'org_admin',
+  tenant_id = '',
 ) {
-  return withOrgTx(org_id, user_id, async (tx) => {
+  const ctx: RoleTxContext = { role, org_id, tenant_id, user_id };
+  return withRoleTx(ctx, async (tx) => {
     const sets: string[] = [];
     const params: unknown[] = [];
 
@@ -64,8 +70,15 @@ export async function updateFollowUp(
   });
 }
 
-export async function deleteFollowUp(org_id: string, user_id: string, follow_up_id: string) {
-  return withOrgTx(org_id, user_id, async (tx) => {
+export async function deleteFollowUp(
+  org_id: string,
+  user_id: string,
+  follow_up_id: string,
+  role = 'org_admin',
+  tenant_id = '',
+) {
+  const ctx: RoleTxContext = { role, org_id, tenant_id, user_id };
+  return withRoleTx(ctx, async (tx) => {
     await tx.unsafe(
       `UPDATE lead_follow_ups
        SET is_deleted = TRUE, deleted_at = CLOCK_TIMESTAMP(), deleted_by = $1::uuid

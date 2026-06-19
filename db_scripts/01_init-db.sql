@@ -1,5 +1,5 @@
---drop database crm (force)
---create database crm
+--drop database crm_v2 (force)
+--create database crm_v2
 -- ===================================================================
 -- CRM Monorepo — Merged Production Schema
 -- Combines: monorepo UUID-based design + EXISTING_WORKING_CODE features
@@ -16,10 +16,12 @@ CREATE TABLE IF NOT EXISTS schema_versions (
   applied_at  TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP()
 );
 INSERT INTO schema_versions (version, description) VALUES
-  ('1.0.0', 'Merged monorepo + EXISTING_WORKING_CODE: geo tables, soft-delete, business-rule triggers, audit triggers, service logins')
+  ('1.0.0', 'Merged monorepo + EXISTING_WORKING_CODE: geo tables, soft-delete, business-rule triggers, audit triggers, service logins'),
+  ('1.1.0', 'user_org_mapping table, legal_entity_name/brand_name on organizations, fixed multi-org RLS gaps')
 ON CONFLICT (version) DO NOTHING;
 
 -- ── Extensions ─────────────────────────────────────────────────────
+CREATE EXTENSION IF NOT EXISTS pgcrypto;   -- gen_random_bytes() used by gen_uuidv7()
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE EXTENSION IF NOT EXISTS btree_gin;
 
@@ -30,6 +32,39 @@ EXCEPTION WHEN OTHERS THEN
   RAISE WARNING 'pgvector not available (%). AI embedding features disabled.', SQLERRM;
 END;
 $$;
+
+-- ── UUIDv7 generator (RFC 9562 §5.7) ──────────────────────────────
+-- Time-ordered UUIDs: 48-bit ms timestamp prefix eliminates the
+-- random-insert B-tree fragmentation caused by gen_uuidv7() (v4).
+-- Works on PostgreSQL 14+ with no extensions required.
+CREATE OR REPLACE FUNCTION gen_uuidv7() RETURNS UUID
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_millis BIGINT;
+  v_bytes  BYTEA;
+  v_hex    TEXT;
+BEGIN
+  v_millis := (EXTRACT(EPOCH FROM CLOCK_TIMESTAMP()) * 1000)::BIGINT;
+  v_bytes  := gen_random_bytes(10);
+  v_hex :=
+    -- 48-bit unix_ts_ms: high 32 bits (8 hex) + low 16 bits (4 hex)
+    lpad(to_hex(v_millis >> 16), 8, '0') ||
+    lpad(to_hex(v_millis & 65535), 4, '0') ||
+    -- version nibble (7) + 12-bit rand_a
+    '7' ||
+    lpad(to_hex(((get_byte(v_bytes, 0) & 15) << 8) | get_byte(v_bytes, 1)), 3, '0') ||
+    -- variant bits (10xxxxxx) + rand_b
+    lpad(to_hex((get_byte(v_bytes, 2) & 63) | 128), 2, '0') ||
+    lpad(to_hex(get_byte(v_bytes, 3)), 2, '0') ||
+    encode(substring(v_bytes from 5 for 6), 'hex');
+  RETURN (
+    substring(v_hex, 1, 8)  || '-' ||
+    substring(v_hex, 9, 4)  || '-' ||
+    substring(v_hex, 13, 4) || '-' ||
+    substring(v_hex, 17, 4) || '-' ||
+    substring(v_hex, 21, 12)
+  )::UUID;
+END; $$;
 
 -- ── Roles (idempotent) ─────────────────────────────────────────────
 DO $$
@@ -52,10 +87,10 @@ END $$;
 
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
-    CREATE ROLE service_role WITH LOGIN PASSWORD 'replace_in_env' BYPASSRLS;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'crm_service') THEN
+    CREATE ROLE crm_service WITH LOGIN PASSWORD 'CrmSvc_Dev2025' BYPASSRLS;
   ELSE
-    ALTER ROLE service_role WITH LOGIN BYPASSRLS;
+    ALTER ROLE crm_service WITH LOGIN PASSWORD 'CrmSvc_Dev2025' BYPASSRLS;
   END IF;
 END $$;
 
@@ -144,7 +179,7 @@ ON CONFLICT (state_id, name) DO NOTHING;
 -- ===================================================================
 
 CREATE TABLE IF NOT EXISTS user_roles (
-  id          UUID     PRIMARY KEY DEFAULT gen_random_uuid(),
+  id          UUID     PRIMARY KEY DEFAULT gen_uuidv7(),
   name        TEXT     NOT NULL UNIQUE,
   label       TEXT     NOT NULL,
   description TEXT,
@@ -166,7 +201,7 @@ ON CONFLICT (name) DO UPDATE SET
   rank        = EXCLUDED.rank;
 
 CREATE TABLE IF NOT EXISTS lead_stage (
-  id                UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+  id                UUID    PRIMARY KEY DEFAULT gen_uuidv7(),
   name              TEXT    NOT NULL UNIQUE,
   label             TEXT    NOT NULL,
   description       TEXT,
@@ -191,7 +226,7 @@ ON CONFLICT (name) DO UPDATE SET
   is_terminated     = EXCLUDED.is_terminated;
 
 CREATE TABLE IF NOT EXISTS lead_stage_outcome (
-  id               UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+  id               UUID    PRIMARY KEY DEFAULT gen_uuidv7(),
   stage_id         UUID    NOT NULL REFERENCES lead_stage(id) ON DELETE RESTRICT,
   name             TEXT    NOT NULL,
   label            TEXT    NOT NULL,
@@ -255,7 +290,7 @@ END;
 $$;
 
 CREATE TABLE IF NOT EXISTS interaction_types (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id          UUID PRIMARY KEY DEFAULT gen_uuidv7(),
   name        TEXT NOT NULL UNIQUE,
   description TEXT
 );
@@ -271,7 +306,7 @@ INSERT INTO interaction_types (name, description) VALUES
 ON CONFLICT (name) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS follow_up_statuses (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id          UUID PRIMARY KEY DEFAULT gen_uuidv7(),
   name        TEXT NOT NULL UNIQUE,
   label       TEXT NOT NULL,
   description TEXT
@@ -284,7 +319,7 @@ INSERT INTO follow_up_statuses (name, label, description) VALUES
 ON CONFLICT (name) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS marketing_platforms (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id          UUID PRIMARY KEY DEFAULT gen_uuidv7(),
   name        TEXT NOT NULL UNIQUE,
   description TEXT
 );
@@ -302,7 +337,7 @@ INSERT INTO marketing_platforms (name, description) VALUES
 ON CONFLICT (name) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS campaign_statuses (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id          UUID PRIMARY KEY DEFAULT gen_uuidv7(),
   name        TEXT NOT NULL UNIQUE,
   description TEXT
 );
@@ -315,7 +350,7 @@ INSERT INTO campaign_statuses (name, description) VALUES
 ON CONFLICT (name) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS org_types (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id          UUID PRIMARY KEY DEFAULT gen_uuidv7(),
   name        TEXT NOT NULL UNIQUE,
   description TEXT
 );
@@ -332,7 +367,7 @@ INSERT INTO org_types (name, description) VALUES
 ON CONFLICT (name) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS tenant_domains (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id          UUID PRIMARY KEY DEFAULT gen_uuidv7(),
   name        TEXT NOT NULL UNIQUE,
   description TEXT
 );
@@ -349,7 +384,7 @@ INSERT INTO tenant_domains (name, description) VALUES
 ON CONFLICT (name) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS tenant_plan_types (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id          UUID PRIMARY KEY DEFAULT gen_uuidv7(),
   name        TEXT NOT NULL UNIQUE,
   description TEXT
 );
@@ -362,7 +397,7 @@ ON CONFLICT (name) DO NOTHING;
 
 -- Monorepo addition: source channel for organic / non-campaign leads
 CREATE TABLE IF NOT EXISTS lead_sources (
-  id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id   UUID PRIMARY KEY DEFAULT gen_uuidv7(),
   name TEXT NOT NULL UNIQUE
 );
 INSERT INTO lead_sources (name) VALUES
@@ -381,12 +416,12 @@ RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN NEW.updated_at := CLOCK_TIMESTAMP(); RETURN NEW; END; $$;
 
 -- Converts a physical DELETE into a soft delete (UPDATE is_deleted=TRUE).
--- service_role bypasses this and performs a real delete (GDPR/purge).
+-- crm_service bypasses this and performs a real delete (GDPR/purge).
 CREATE OR REPLACE FUNCTION soft_delete_row()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 DECLARE v_user_id UUID;
 BEGIN
-  IF current_user = 'service_role' THEN RETURN OLD; END IF;
+  IF current_user = 'crm_service' THEN RETURN OLD; END IF;
   BEGIN
     v_user_id := NULLIF(current_setting('app.current_user_id', true), '')::uuid;
   EXCEPTION WHEN OTHERS THEN v_user_id := NULL; END;
@@ -428,7 +463,7 @@ END; $$;
 
 -- ── TENANTS ───────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS tenants (
-  id           UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+  id           UUID    PRIMARY KEY DEFAULT gen_uuidv7(),
   name         TEXT    NOT NULL UNIQUE,
   domain_id    UUID    REFERENCES tenant_domains(id),
   plan_type_id UUID    REFERENCES tenant_plan_types(id),
@@ -452,10 +487,12 @@ CREATE TRIGGER trg_tenants_soft_delete
 
 -- ── ORGANIZATIONS ─────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS organizations (
-  id            UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+  id            UUID    PRIMARY KEY DEFAULT gen_uuidv7(),
   tenant_id     UUID    NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
-  name          TEXT    NOT NULL,
-  org_type_id   UUID    REFERENCES org_types(id),
+  name               TEXT    NOT NULL,
+  legal_entity_name  TEXT,
+  brand_name         TEXT,
+  org_type_id        UUID    REFERENCES org_types(id),
   address_line1 TEXT,
   address_line2 TEXT,
   landmark      TEXT,
@@ -488,7 +525,7 @@ CREATE TRIGGER trg_organizations_soft_delete
 -- ── USERS ─────────────────────────────────────────────────────────
 -- full_name is GENERATED ALWAYS AS STORED — never insert it directly.
 CREATE TABLE IF NOT EXISTS users (
-  id                    UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+  id                    UUID    PRIMARY KEY DEFAULT gen_uuidv7(),
   org_id                UUID    NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
   first_name            TEXT    NOT NULL,
   middle_name           TEXT,
@@ -536,7 +573,7 @@ CREATE TRIGGER trg_01_users_set_created_by
 
 -- ── BRANCHES (monorepo addition: physical branch within an org) ───
 CREATE TABLE IF NOT EXISTS branches (
-  id         UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+  id         UUID    PRIMARY KEY DEFAULT gen_uuidv7(),
   org_id     UUID    NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
   name       TEXT    NOT NULL,
   is_active  BOOLEAN NOT NULL DEFAULT TRUE,
@@ -546,7 +583,7 @@ CREATE TABLE IF NOT EXISTS branches (
 
 -- ── AD_CAMPAIGNS ──────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS ad_campaigns (
-  id          UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+  id          UUID    PRIMARY KEY DEFAULT gen_uuidv7(),
   org_id      UUID    NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
   name        TEXT    NOT NULL,
   platform_id UUID    NOT NULL REFERENCES marketing_platforms(id) ON DELETE RESTRICT,
@@ -586,7 +623,7 @@ CREATE TRIGGER trg_01_ad_campaigns_set_created_by
 -- duplicate_lead_id: walk-in dedup pointer to the oldest digital lead with same phone/email.
 -- embedding column stub: uncomment after pgvector confirmed.
 CREATE TABLE IF NOT EXISTS marketing_leads (
-  id               UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+  id               UUID    PRIMARY KEY DEFAULT gen_uuidv7(),
   org_id           UUID    NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
   first_name       TEXT    NOT NULL,
   middle_name      TEXT,
@@ -655,7 +692,7 @@ CREATE TRIGGER trg_01_marketing_leads_set_created_by
 -- ── LEAD_INTERACTIONS ─────────────────────────────────────────────
 -- Append-only log — no updated_at, no update trigger.
 CREATE TABLE IF NOT EXISTS lead_interactions (
-  id                  UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+  id                  UUID    PRIMARY KEY DEFAULT gen_uuidv7(),
   org_id              UUID    NOT NULL REFERENCES organizations(id)   ON DELETE RESTRICT,
   lead_id             UUID    NOT NULL REFERENCES marketing_leads(id) ON DELETE CASCADE,
   user_id             UUID    NOT NULL REFERENCES users(id)           ON DELETE RESTRICT,
@@ -684,7 +721,7 @@ CREATE TRIGGER trg_01_lead_interactions_set_created_by
 
 -- ── LEAD_FOLLOW_UPS ───────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS lead_follow_ups (
-  id               UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+  id               UUID    PRIMARY KEY DEFAULT gen_uuidv7(),
   org_id           UUID    NOT NULL REFERENCES organizations(id)   ON DELETE RESTRICT,
   lead_id          UUID    NOT NULL REFERENCES marketing_leads(id) ON DELETE CASCADE,
   assigned_user_id UUID    NOT NULL REFERENCES users(id)           ON DELETE RESTRICT,
@@ -719,7 +756,7 @@ CREATE TRIGGER trg_01_lead_follow_ups_set_created_by
 -- ── LEAD_ASSIGNMENT_LOG ───────────────────────────────────────────
 -- Populated automatically by trigger on marketing_leads.
 CREATE TABLE IF NOT EXISTS lead_assignment_log (
-  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id                   UUID PRIMARY KEY DEFAULT gen_uuidv7(),
   org_id               UUID NOT NULL REFERENCES organizations(id)   ON DELETE RESTRICT,
   lead_id              UUID NOT NULL REFERENCES marketing_leads(id) ON DELETE CASCADE,
   assigned_by_id       UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -736,7 +773,7 @@ CREATE TABLE IF NOT EXISTS lead_assignment_log (
 -- ── ACTIVITIES ────────────────────────────────────────────────────
 -- Fire-and-forget log written by activities-service.
 CREATE TABLE IF NOT EXISTS activities (
-  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id           UUID PRIMARY KEY DEFAULT gen_uuidv7(),
   action_type  TEXT NOT NULL,
   performed_by UUID REFERENCES users(id),
   target_id    UUID,
@@ -749,7 +786,7 @@ CREATE TABLE IF NOT EXISTS activities (
 -- ── LEAD_STATUS_LOG ───────────────────────────────────────────────
 -- Immutable stage-transition log. Written by trigger only.
 CREATE TABLE IF NOT EXISTS lead_status_log (
-  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id               UUID PRIMARY KEY DEFAULT gen_uuidv7(),
   org_id           UUID NOT NULL REFERENCES organizations(id)   ON DELETE RESTRICT,
   lead_id          UUID NOT NULL REFERENCES marketing_leads(id) ON DELETE CASCADE,
   changed_by_id    UUID REFERENCES users(id)            ON DELETE SET NULL,
@@ -774,7 +811,7 @@ CREATE INDEX IF NOT EXISTS idx_lead_status_log_changed_by
 -- UPDATE: diff-style {"field": {"old": v, "new": v}}
 -- DELETE: full to_jsonb(OLD) snapshot
 CREATE TABLE IF NOT EXISTS marketing_leads_history (
-  id                 UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+  id                 UUID    PRIMARY KEY DEFAULT gen_uuidv7(),
   lead_id            UUID    NOT NULL REFERENCES marketing_leads(id) ON DELETE RESTRICT,
   changed_by_user_id UUID    REFERENCES users(id) ON DELETE SET NULL,
   operation          CHAR(1) NOT NULL CHECK (operation IN ('I','U','D')),
@@ -790,7 +827,7 @@ CREATE INDEX IF NOT EXISTS idx_marketing_leads_history_lead_changed
 -- (which has its own history table above).
 -- Columns cover both the monorepo convention and EXISTING_WORKING_CODE convention.
 CREATE TABLE IF NOT EXISTS audit_log (
-  id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  id             UUID        PRIMARY KEY DEFAULT gen_uuidv7(),
   table_name     TEXT        NOT NULL,
   operation      CHAR(1)     NOT NULL CHECK (operation IN ('U', 'D')),
   -- EXISTING_WORKING_CODE naming
@@ -1849,9 +1886,9 @@ REVOKE ALL    ON SCHEMA public FROM PUBLIC;
 GRANT  USAGE  ON SCHEMA public TO PUBLIC;
 GRANT  USAGE  ON SCHEMA public TO app_user;
 GRANT  USAGE  ON SCHEMA public TO tenant_admin;
-GRANT  USAGE  ON SCHEMA public TO service_role;
+GRANT  USAGE  ON SCHEMA public TO crm_service;
 
-DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO service_role', current_database()); END; $$;
+DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO crm_service', current_database()); END; $$;
 
 -- app_user: DML on operational tables; SELECT-only on audit + lookups
 GRANT SELECT, INSERT, UPDATE ON TABLE
@@ -1905,11 +1942,11 @@ TO tenant_admin;
 
 GRANT EXECUTE ON FUNCTION can_assign_to(UUID,UUID,UUID) TO tenant_admin;
 
--- service_role: unrestricted
-GRANT ALL PRIVILEGES ON ALL TABLES    IN SCHEMA public TO service_role;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO service_role;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON TABLES    TO service_role;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON SEQUENCES TO service_role;
+-- crm_service: unrestricted
+GRANT ALL PRIVILEGES ON ALL TABLES    IN SCHEMA public TO crm_service;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO crm_service;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON TABLES    TO crm_service;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON SEQUENCES TO crm_service;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO app_user;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO tenant_admin;
 
@@ -1924,8 +1961,8 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO tenant_admin
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'lead_svc') THEN
-    CREATE ROLE lead_svc WITH LOGIN PASSWORD 'replace_in_env' NOINHERIT;
-  ELSE ALTER ROLE lead_svc WITH LOGIN NOINHERIT; END IF;
+    CREATE ROLE lead_svc WITH LOGIN PASSWORD 'LeadSvc_Dev2025' NOINHERIT;
+  ELSE ALTER ROLE lead_svc WITH LOGIN PASSWORD 'LeadSvc_Dev2025' NOINHERIT; END IF;
 END; $$;
 GRANT app_user TO lead_svc;
 
@@ -1964,8 +2001,8 @@ GRANT app_user TO intake_svc;
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'tenant_dash_svc') THEN
-    CREATE ROLE tenant_dash_svc WITH LOGIN PASSWORD 'replace_in_env' NOINHERIT;
-  ELSE ALTER ROLE tenant_dash_svc WITH LOGIN NOINHERIT; END IF;
+    CREATE ROLE tenant_dash_svc WITH LOGIN PASSWORD 'TenantSvc_Dev2025' NOINHERIT;
+  ELSE ALTER ROLE tenant_dash_svc WITH LOGIN PASSWORD 'TenantSvc_Dev2025' NOINHERIT; END IF;
 END; $$;
 GRANT tenant_admin TO tenant_dash_svc;
 
@@ -1997,12 +2034,395 @@ BEGIN
   EXECUTE format('GRANT CONNECT ON DATABASE %I TO analytics_svc',   v_db);
 END; $$;
 
--- Password rotation reminder (run before first deploy):
--- ALTER ROLE lead_svc        WITH PASSWORD :'LEAD_SVC_PWD';
+-- Production password rotation — run via psql with -v vars set:
+--   psql ... -v LEAD_SVC_PWD=xxx -v TENANT_DASH_PWD=xxx -v CRM_SVC_PWD=xxx ...
+-- Maps to .env: DATABASE_URL / DATABASE_URL_TENANT / DATABASE_URL_SERVICE
+-- ALTER ROLE lead_svc        WITH PASSWORD :'LEAD_SVC_PWD';       -- → DATABASE_URL
+-- ALTER ROLE tenant_dash_svc WITH PASSWORD :'TENANT_DASH_PWD';    -- → DATABASE_URL_TENANT
+-- ALTER ROLE crm_service     WITH PASSWORD :'CRM_SVC_PWD';        -- → DATABASE_URL_SERVICE
 -- ALTER ROLE campaign_svc    WITH PASSWORD :'CAMPAIGN_SVC_PWD';
 -- ALTER ROLE user_mgmt_svc   WITH PASSWORD :'USER_MGMT_PWD';
 -- ALTER ROLE notif_svc       WITH PASSWORD :'NOTIF_SVC_PWD';
 -- ALTER ROLE intake_svc      WITH PASSWORD :'INTAKE_SVC_PWD';
--- ALTER ROLE tenant_dash_svc WITH PASSWORD :'TENANT_DASH_PWD';
 -- ALTER ROLE analytics_svc   WITH PASSWORD :'ANALYTICS_SVC_PWD';
--- ALTER ROLE service_role    WITH PASSWORD :'SERVICE_ROLE_PWD';
+
+-- ===================================================================
+-- v1.1: USER-ORG MAPPING + MULTI-ORG RLS FIX
+-- ===================================================================
+
+-- ── USER_ORG_MAPPING ──────────────────────────────────────────────
+-- Source of truth for which orgs a user can access and at what role.
+-- Replaces the single org_id + role_id on users for access control.
+--
+-- users.org_id  remains as the user's PRIMARY / home org (FK integrity
+--               and fallback when no org is selected).
+-- users.role_id remains as the user's DEFAULT role (mirrors the home
+--               org row here; kept for backward-compat during transition).
+CREATE TABLE IF NOT EXISTS user_org_mapping (
+  user_id    UUID        NOT NULL REFERENCES users(id)         ON DELETE CASCADE,
+  org_id     UUID        NOT NULL REFERENCES organizations(id)  ON DELETE CASCADE,
+  role_id    UUID        NOT NULL REFERENCES user_roles(id)     ON DELETE RESTRICT,
+  is_active  BOOLEAN     NOT NULL DEFAULT TRUE,
+  granted_by UUID        REFERENCES users(id)                   ON DELETE SET NULL,
+  granted_at TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP(),
+  PRIMARY KEY (user_id, org_id)
+);
+
+DROP TRIGGER IF EXISTS trg_user_org_mapping_updated_at ON user_org_mapping;
+CREATE TRIGGER trg_user_org_mapping_updated_at
+  BEFORE UPDATE ON user_org_mapping
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE INDEX IF NOT EXISTS idx_user_org_mapping_user_active
+  ON user_org_mapping (user_id) WHERE is_active;
+CREATE INDEX IF NOT EXISTS idx_user_org_mapping_org_active
+  ON user_org_mapping (org_id)  WHERE is_active;
+CREATE INDEX IF NOT EXISTS idx_user_org_mapping_role
+  ON user_org_mapping (role_id);
+
+-- ── RLS HELPER FUNCTIONS (SECURITY DEFINER) ───────────────────────
+-- These bypass RLS on user_org_mapping so they can be used safely
+-- inside RLS policies on OTHER tables without recursive infinite loops.
+
+DROP FUNCTION IF EXISTS fn_user_active_orgs(UUID);
+CREATE FUNCTION fn_user_active_orgs(p_user_id UUID)
+RETURNS UUID[] LANGUAGE sql STABLE SECURITY DEFINER AS $$
+  SELECT ARRAY(SELECT org_id FROM user_org_mapping WHERE user_id = p_user_id AND is_active)
+$$;
+
+DROP FUNCTION IF EXISTS fn_org_active_users(UUID);
+CREATE FUNCTION fn_org_active_users(p_org_id UUID)
+RETURNS UUID[] LANGUAGE sql STABLE SECURITY DEFINER AS $$
+  SELECT ARRAY(SELECT user_id FROM user_org_mapping WHERE org_id = p_org_id AND is_active)
+$$;
+
+-- Returns role rank of a user in an org (-1 if no active mapping).
+CREATE OR REPLACE FUNCTION fn_user_org_rank(p_user_id UUID, p_org_id UUID)
+RETURNS INT LANGUAGE plpgsql STABLE SECURITY DEFINER AS $$
+DECLARE v_rank INT;
+BEGIN
+  SELECT ur.rank INTO v_rank
+  FROM user_org_mapping uom
+  JOIN user_roles ur ON ur.id = uom.role_id
+  WHERE uom.user_id = p_user_id AND uom.org_id = p_org_id AND uom.is_active;
+  RETURN COALESCE(v_rank, -1);
+END; $$;
+
+-- ── AUTO-GRANT TRIGGER 1 ──────────────────────────────────────────
+-- New org added to a tenant → all existing tenant_admins in that
+-- tenant automatically receive a row for the new org.
+CREATE OR REPLACE FUNCTION auto_grant_tenant_admins_on_new_org()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  INSERT INTO user_org_mapping (user_id, org_id, role_id, is_active, granted_by)
+  SELECT uom.user_id, NEW.id, uom.role_id, TRUE, NULL
+  FROM user_org_mapping uom
+  JOIN organizations    o  ON o.id  = uom.org_id
+  JOIN user_roles       ur ON ur.id = uom.role_id
+  WHERE o.tenant_id = NEW.tenant_id
+    AND ur.name     = 'tenant_admin'
+    AND uom.is_active
+  ON CONFLICT (user_id, org_id) DO NOTHING;
+  RETURN NEW;
+END; $$;
+
+DROP TRIGGER IF EXISTS trg_auto_grant_tenant_admins_on_new_org ON organizations;
+CREATE TRIGGER trg_auto_grant_tenant_admins_on_new_org
+  AFTER INSERT ON organizations
+  FOR EACH ROW EXECUTE FUNCTION auto_grant_tenant_admins_on_new_org();
+
+-- ── AUTO-GRANT TRIGGER 2 ──────────────────────────────────────────
+-- User first granted tenant_admin in any org → they automatically
+-- receive rows for all other existing orgs in the same tenant.
+-- pg_trigger_depth() guard prevents recursive re-firing when this
+-- function's own INSERTs trigger the same event.
+CREATE OR REPLACE FUNCTION auto_grant_all_orgs_on_tenant_admin()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE v_tenant_id UUID;
+BEGIN
+  IF pg_trigger_depth() > 1 THEN RETURN NEW; END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM user_roles WHERE id = NEW.role_id AND name = 'tenant_admin'
+  ) THEN RETURN NEW; END IF;
+
+  SELECT tenant_id INTO v_tenant_id FROM organizations WHERE id = NEW.org_id;
+
+  INSERT INTO user_org_mapping (user_id, org_id, role_id, is_active, granted_by)
+  SELECT NEW.user_id, o.id, NEW.role_id, TRUE, NEW.granted_by
+  FROM organizations o
+  WHERE o.tenant_id = v_tenant_id
+    AND o.id       <> NEW.org_id
+    AND NOT o.is_deleted
+  ON CONFLICT (user_id, org_id) DO NOTHING;
+
+  RETURN NEW;
+END; $$;
+
+DROP TRIGGER IF EXISTS trg_auto_grant_all_orgs_on_tenant_admin ON user_org_mapping;
+CREATE TRIGGER trg_auto_grant_all_orgs_on_tenant_admin
+  AFTER INSERT ON user_org_mapping
+  FOR EACH ROW EXECUTE FUNCTION auto_grant_all_orgs_on_tenant_admin();
+
+-- ── UPDATED FK SCOPE CHECKS ───────────────────────────────────────
+-- Now validate via user_org_mapping so multi-org users (whose home
+-- org_id differs from the working org) are not incorrectly rejected.
+
+CREATE OR REPLACE FUNCTION check_lead_fk_org_scope()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.campaign_id IS NOT NULL THEN
+    PERFORM 1 FROM ad_campaigns
+    WHERE id = NEW.campaign_id AND org_id = NEW.org_id AND NOT is_deleted;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'campaign_id % does not belong to org % or has been deleted.',
+        NEW.campaign_id, NEW.org_id;
+    END IF;
+  END IF;
+  IF NEW.assigned_user_id IS NOT NULL THEN
+    PERFORM 1
+    FROM user_org_mapping uom
+    JOIN users u ON u.id = uom.user_id
+    WHERE uom.user_id = NEW.assigned_user_id
+      AND uom.org_id  = NEW.org_id
+      AND uom.is_active
+      AND u.is_active AND NOT u.is_deleted;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'assigned_user_id % has no active mapping to org % or has been deleted.',
+        NEW.assigned_user_id, NEW.org_id;
+    END IF;
+  END IF;
+  RETURN NEW;
+END; $$;
+
+CREATE OR REPLACE FUNCTION check_interaction_fk_org_scope()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM 1 FROM marketing_leads
+  WHERE id = NEW.lead_id AND org_id = NEW.org_id AND NOT is_deleted;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'lead_id % does not belong to org % or has been deleted.',
+      NEW.lead_id, NEW.org_id;
+  END IF;
+  PERFORM 1
+  FROM user_org_mapping uom
+  JOIN users u ON u.id = uom.user_id
+  WHERE uom.user_id = NEW.user_id
+    AND uom.org_id  = NEW.org_id
+    AND uom.is_active
+    AND u.is_active AND NOT u.is_deleted;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'user_id % has no active mapping to org % or has been deleted.',
+      NEW.user_id, NEW.org_id;
+  END IF;
+  RETURN NEW;
+END; $$;
+
+CREATE OR REPLACE FUNCTION check_follow_up_fk_org_scope()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM 1 FROM marketing_leads
+  WHERE id = NEW.lead_id AND org_id = NEW.org_id AND NOT is_deleted;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'lead_id % does not belong to org % or has been deleted.',
+      NEW.lead_id, NEW.org_id;
+  END IF;
+  PERFORM 1
+  FROM user_org_mapping uom
+  JOIN users u ON u.id = uom.user_id
+  WHERE uom.user_id = NEW.assigned_user_id
+    AND uom.org_id  = NEW.org_id
+    AND uom.is_active
+    AND u.is_active AND NOT u.is_deleted;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'assigned_user_id % has no active mapping to org % or has been deleted.',
+      NEW.assigned_user_id, NEW.org_id;
+  END IF;
+  RETURN NEW;
+END; $$;
+
+-- ── UPDATED can_assign_to ─────────────────────────────────────────
+-- Looks up role via user_org_mapping instead of users.org_id so that
+-- multi-org users are evaluated for the org they are currently working in.
+CREATE OR REPLACE FUNCTION can_assign_to(
+  p_org_id         UUID,
+  p_acting_user_id UUID,
+  p_target_user_id UUID
+) RETURNS BOOLEAN LANGUAGE plpgsql STABLE SECURITY DEFINER AS $$
+DECLARE
+  v_role     TEXT;
+  v_in_scope BOOLEAN;
+BEGIN
+  IF p_acting_user_id = p_target_user_id THEN RETURN TRUE; END IF;
+
+  SELECT ur.name INTO v_role
+  FROM user_org_mapping uom
+  JOIN user_roles ur ON ur.id = uom.role_id
+  JOIN users      u  ON u.id  = uom.user_id
+  WHERE uom.user_id = p_acting_user_id
+    AND uom.org_id  = p_org_id
+    AND uom.is_active
+    AND u.is_active AND NOT u.is_deleted;
+
+  IF v_role IS NULL THEN RETURN FALSE; END IF;
+  IF v_role IN ('super_admin','tenant_admin','org_admin') THEN RETURN TRUE; END IF;
+
+  IF v_role IN ('org_manager','org_sr_manager','senior_sales_executive') THEN
+    SELECT COUNT(*) > 0 INTO v_in_scope
+    FROM vw_user_team_members
+    WHERE manager_id = p_acting_user_id
+      AND member_id  = p_target_user_id
+      AND org_id     = p_org_id;
+    RETURN COALESCE(v_in_scope, FALSE);
+  END IF;
+
+  RETURN FALSE;
+END; $$;
+
+-- ── RLS: organizations ────────────────────────────────────────────
+-- Previously had no RLS — anyone with app_user could read all orgs.
+-- Now: app_user sees only orgs they are mapped to; tenant_admin sees
+-- all orgs within their tenant.
+ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE organizations FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS org_isolation_policy    ON organizations;
+DROP POLICY IF EXISTS tenant_isolation_policy ON organizations;
+
+CREATE POLICY org_isolation_policy ON organizations AS PERMISSIVE FOR SELECT TO app_user
+  USING (
+    NOT is_deleted AND
+    id = ANY(fn_user_active_orgs(
+      NULLIF(current_setting('app.current_user_id', true), '')::uuid
+    ))
+  );
+
+CREATE POLICY tenant_isolation_policy ON organizations AS PERMISSIVE FOR ALL TO tenant_admin
+  USING (
+    tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+    AND NOT is_deleted
+  )
+  WITH CHECK (
+    tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+    AND NOT is_deleted
+  );
+
+-- ── RLS: users — update SELECT to use user_org_mapping ────────────
+-- Old policy: org_id = current_org_id (breaks for multi-org users
+-- whose home org differs from the org they're currently working in).
+-- New SELECT policy: see all users who have an active mapping to the
+-- current org (regardless of their home org_id).
+-- Write policies remain anchored to org_id for home-org assignment.
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS org_isolation_policy    ON users;
+DROP POLICY IF EXISTS tenant_isolation_policy ON users;
+
+CREATE POLICY users_org_select ON users AS PERMISSIVE FOR SELECT TO app_user
+  USING (
+    NOT is_deleted AND
+    id = ANY(fn_org_active_users(
+      NULLIF(current_setting('app.current_org_id', true), '')::uuid
+    ))
+  );
+
+CREATE POLICY users_org_write ON users AS PERMISSIVE FOR INSERT TO app_user
+  WITH CHECK (
+    org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid
+    AND NOT is_deleted
+  );
+
+CREATE POLICY users_org_update ON users AS PERMISSIVE FOR UPDATE TO app_user
+  USING (
+    org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid
+    AND NOT is_deleted
+  )
+  WITH CHECK (
+    org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid
+    AND NOT is_deleted
+  );
+
+CREATE POLICY users_tenant_isolation ON users AS PERMISSIVE FOR ALL TO tenant_admin
+  USING (
+    org_id IN (
+      SELECT id FROM organizations
+      WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+        AND NOT is_deleted
+    ) AND NOT is_deleted
+  )
+  WITH CHECK (
+    org_id IN (
+      SELECT id FROM organizations
+      WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+        AND NOT is_deleted
+    ) AND NOT is_deleted
+  );
+
+-- ── RLS: user_org_mapping ─────────────────────────────────────────
+-- Policies use SECURITY DEFINER helpers to avoid recursive RLS
+-- (a policy querying user_org_mapping would trigger its own RLS).
+ALTER TABLE user_org_mapping ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_org_mapping FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS self_read_policy        ON user_org_mapping;
+DROP POLICY IF EXISTS org_admin_manage_policy ON user_org_mapping;
+DROP POLICY IF EXISTS tenant_isolation_policy ON user_org_mapping;
+
+-- Any user can read their own mapping rows.
+CREATE POLICY self_read_policy ON user_org_mapping AS PERMISSIVE FOR SELECT TO app_user
+  USING (
+    user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid
+  );
+
+-- Org admins (rank >= 80) can manage mappings within their current org.
+-- fn_user_org_rank is SECURITY DEFINER so it bypasses RLS on this table.
+CREATE POLICY org_admin_manage_policy ON user_org_mapping AS PERMISSIVE FOR ALL TO app_user
+  USING (
+    org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid
+    AND fn_user_org_rank(
+      NULLIF(current_setting('app.current_user_id', true), '')::uuid,
+      NULLIF(current_setting('app.current_org_id',  true), '')::uuid
+    ) >= 80
+  )
+  WITH CHECK (
+    org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid
+    AND fn_user_org_rank(
+      NULLIF(current_setting('app.current_user_id', true), '')::uuid,
+      NULLIF(current_setting('app.current_org_id',  true), '')::uuid
+    ) >= 80
+  );
+
+-- tenant_admin can manage all mappings across their tenant's orgs.
+CREATE POLICY tenant_isolation_policy ON user_org_mapping AS PERMISSIVE FOR ALL TO tenant_admin
+  USING (
+    org_id IN (
+      SELECT id FROM organizations
+      WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+        AND NOT is_deleted
+    )
+  )
+  WITH CHECK (
+    org_id IN (
+      SELECT id FROM organizations
+      WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+        AND NOT is_deleted
+    )
+  );
+
+-- ── GRANTS: user_org_mapping ──────────────────────────────────────
+GRANT SELECT, INSERT, UPDATE ON TABLE user_org_mapping TO app_user;
+REVOKE DELETE ON TABLE user_org_mapping FROM app_user;
+
+GRANT SELECT, INSERT, UPDATE ON TABLE user_org_mapping TO tenant_admin;
+REVOKE DELETE ON TABLE user_org_mapping FROM tenant_admin;
+
+GRANT ALL PRIVILEGES ON TABLE user_org_mapping TO crm_service;
+
+-- tenant_admin can also INSERT/UPDATE organizations (create new branches/orgs)
+GRANT INSERT, UPDATE ON TABLE organizations TO tenant_admin;
+
+GRANT EXECUTE ON FUNCTION fn_user_active_orgs(UUID)  TO app_user, tenant_admin;
+GRANT EXECUTE ON FUNCTION fn_org_active_users(UUID)  TO app_user, tenant_admin;
+GRANT EXECUTE ON FUNCTION fn_user_org_rank(UUID,UUID) TO app_user, tenant_admin;

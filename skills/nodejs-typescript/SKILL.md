@@ -1,3 +1,96 @@
+## When This Skill Applies
+
+Trigger this skill for **any** of the following:
+- New feature development (new domain, new route, new service)
+- Refactoring existing Node.js backend code
+- Adding data-fetching logic that spans more than one table
+- Designing or modifying the repository layer
+- Any request containing: "build an API", "add an endpoint", "refactor service", "create a module", "I need to fetch X with Y data"
+
+---
+
+## Refactor Protocol — When the User Says "Refactor"
+
+When the user asks to refactor existing code, follow this exact sequence. Do not skip steps or reorder them.
+
+### Step 1 — Read Before Writing
+
+Before touching a single line of code:
+1. Read every file the user references or that is clearly in scope.
+2. Identify which files exist on disk vs. which are missing from the expected structure.
+3. Map what currently exists to the canonical layer it *should* live in (router / controller / service / repository / middleware).
+
+### Step 2 — Surface Violations, Then Ask
+
+After reading, list every violation of the guidelines you found — do not silently fix them without the user knowing. Group them by severity:
+
+| Severity | Examples |
+|---|---|
+| **Critical** | DB queries in a service, business logic in a controller, `process.env` outside config, missing tenant scoping |
+| **High** | Multi-table joins in TypeScript instead of a view, `as any` / `@ts-ignore`, raw `new Error()` in services |
+| **Medium** | Missing Zod validation on a route, wrong response envelope shape, no rate limit on auth |
+| **Low** | Naming inconsistencies, missing log statements, missing soft-delete guard |
+
+Then ask: *"I found N violations. Should I fix all of them now, or do you want to review the list first?"*
+
+If the user says "just do it" or "fix everything" upfront — proceed without asking. If scope is ambiguous — ask.
+
+### Step 3 — Refactor in Layer Order
+
+Always refactor in this order to avoid cascading type errors:
+
+```
+1. config/index.ts          — fix env var access first; everything imports this
+2. lib/errors.ts            — fix error classes; services depend on them
+3. lib/db/schema/tables/    — fix table schemas; views depend on them
+4. lib/db/schema/views/     — create/fix views; repositories depend on them
+5. [domain].repository.ts   — fix DB access; services depend on this
+6. [domain].service.ts      — fix business logic; controllers depend on this
+7. [domain].schema.ts       — fix Zod schemas; routers and controllers depend on this
+8. [domain].controller.ts   — fix HTTP layer
+9. [domain].router.ts       — fix route declarations last
+10. middleware/              — fix cross-cutting concerns
+```
+
+### Step 4 — Migration SQL for Any View Changes
+
+If the refactor requires creating or modifying a PostgreSQL view:
+- **Stop and ask** the user to confirm the view definition before writing migration SQL.
+- Use the PostgreSQL DB skill to produce the migration file.
+- Never proceed with a view change that affects other consumers without explicit confirmation.
+
+### Step 5 — Produce a Refactor Summary
+
+After all changes, output a summary table:
+
+```
+| File | Change | Reason |
+|------|--------|--------|
+| orders.service.ts | Moved DB query to orders.repository.ts | DB queries must not live in services |
+| orders.repository.ts | Replaced inline join with order_summary view | Multi-table reads must use a PG view |
+| lib/db/schema/views/order-summary.view.ts | Created | Drizzle schema for new view |
+| config/index.ts | Added STRIPE_SECRET_KEY validation | process.env access was inline in service |
+```
+
+### Refactor Rules
+
+- **Never silently change behaviour** — a refactor moves code, it does not change what it does.
+- **Never rename public API endpoints** during a structural refactor — raise it as a separate suggestion.
+- **Never delete a file** without confirming with the user, even if it's clearly dead code.
+- **One layer at a time** — if refactoring service + repository at once would create a broken intermediate state, finish one before starting the other.
+- **If a view needs to be created** for the first time during a refactor (because a repository had inline joins), follow the full DB View Protocol in Section 13 and ask the user to confirm the SQL before running it.
+
+---
+
+## ⚠️ DB View Rule — Read Before Writing Any Repository
+
+> **If data for a response requires joining more than one table, you must never build that join logic in TypeScript.**
+> Instead: create a PostgreSQL view, then query that view via Drizzle ORM.
+
+This is a hard architectural rule, not a preference. See Section 13 for the full protocol.
+
+---
+
 ## 1. Project Structure
 
 This structure is mandatory. Deviate only when the project already has an established convention, and document the deviation explicitly.
@@ -24,8 +117,11 @@ src/
 │
 ├── lib/
 │   ├── db/
-│   │   ├── client.ts                    ← DB client singleton (Prisma / Drizzle / pg pool)
-│   │   └── migrations/                  ← Database migration files
+│   │   ├── client.ts                    ← Drizzle ORM client singleton
+│   │   ├── schema/
+│   │   │   ├── tables/                  ← One file per table: [entity].table.ts
+│   │   │   └── views/                   ← One file per view: [view-name].view.ts  ← CRITICAL
+│   │   └── migrations/                  ← Database migration files (drizzle-kit)
 │   ├── cache/
 │   │   └── client.ts                    ← Redis client singleton
 │   ├── queue/
@@ -190,50 +286,65 @@ export class [Domain]Service {
 
 ```ts
 // api/v1/[domain]/[domain].repository.ts
-import { db }           from '@/lib/db/client';
+// ──────────────────────────────────────────────────────────────────────────────
+// READ BEFORE EDITING: If this method fetches data from more than one table,
+// it MUST query a PostgreSQL view — not join tables in TypeScript/Drizzle.
+// See Section 13: DB View Protocol.
+// ──────────────────────────────────────────────────────────────────────────────
+import { db }              from '@/lib/db/client';
+import { [domain]View }    from '@/lib/db/schema/views/[domain].view';
+import { [domain]Table }   from '@/lib/db/schema/tables/[domain].table';
+import { eq, and, ilike } from 'drizzle-orm';
 import type { Create[Entity]Input, [Domain]Filters, [Entity]View } from './[domain].types';
 import type { Paginated } from '@/types';
 
 export class [Domain]Repository {
+
+  // ── READ: always from the view (multi-table shape) ────────────────────────
   async findMany(filters: [Domain]Filters & { tenantId: string }): Promise<Paginated<[Entity]View>> {
     const { tenantId, page = 1, limit = 20, search, status } = filters;
+    const offset = (page - 1) * limit;
 
-    // Example with Prisma — adapt to your ORM / query builder
-    const where = {
-      tenant_id:  tenantId,
-      deleted_at: null,
-      ...(status  && { status_code: status }),
-      ...(search  && { name: { contains: search, mode: 'insensitive' as const } }),
-    };
+    const conditions = [
+      eq([domain]View.tenantId, tenantId),
+      eq([domain]View.deletedAt, null),
+      ...(status ? [eq([domain]View.status, status)] : []),
+      ...(search ? [ilike([domain]View.name, `%${search}%`)] : []),
+    ];
 
-    const [rows, total] = await Promise.all([
-      db.[domain]_view.findMany({ where, take: limit, skip: (page - 1) * limit, orderBy: { created_at: 'desc' } }),
-      db.[domain].count({ where }),
+    const [rows, [{ count }]] = await Promise.all([
+      db.select().from([domain]View).where(and(...conditions))
+        .limit(limit).offset(offset).orderBy([domain]View.createdAt),
+      db.select({ count: sql<number>`count(*)::int` }).from([domain]View).where(and(...conditions)),
     ]);
 
-    return { data: rows as [Entity]View[], total, page, limit };
+    return { data: rows as [Entity]View[], total: count, page, limit };
   }
 
   async findById(id: string, tenantId: string): Promise<[Entity]View | null> {
-    return db.[domain]_view.findFirst({ where: { id, tenant_id: tenantId, deleted_at: null } }) as Promise<[Entity]View | null>;
+    const rows = await db.select().from([domain]View)
+      .where(and(eq([domain]View.id, id), eq([domain]View.tenantId, tenantId)))
+      .limit(1);
+    return (rows[0] as [Entity]View) ?? null;
   }
 
-  async findBySlug(slug: string, tenantId: string): Promise<[Entity]View | null> {
-    return db.[domain].findFirst({ where: { slug, tenant_id: tenantId, deleted_at: null } }) as Promise<[Entity]View | null>;
-  }
-
+  // ── WRITE: always to the base table, never to a view ─────────────────────
   async create(input: Create[Entity]Input & { tenantId: string; createdBy: string }): Promise<[Entity]View> {
-    const row = await db.[domain].create({ data: { ...mapToSnake(input) } });
+    const [row] = await db.insert([domain]Table).values(input).returning({ id: [domain]Table.id });
     return this.findById(row.id, input.tenantId) as Promise<[Entity]View>;
   }
 
   async update(id: string, input: Update[Entity]Input): Promise<[Entity]View> {
-    await db.[domain].update({ where: { id }, data: { ...mapToSnake(input), updated_at: new Date() } });
+    await db.update([domain]Table)
+      .set({ ...input, updatedAt: new Date() })
+      .where(eq([domain]Table.id, id));
     return this.findById(id, '*') as Promise<[Entity]View>;
   }
 
   async softDelete(id: string): Promise<void> {
-    await db.[domain].update({ where: { id }, data: { deleted_at: new Date() } });
+    await db.update([domain]Table)
+      .set({ deletedAt: new Date() })
+      .where(eq([domain]Table.id, id));
   }
 }
 ```
@@ -292,9 +403,7 @@ export function validate(schemas: ValidateOptions) {
       next();
     } catch (err) {
       if (err instanceof z.ZodError) {
-        next(
-          new ValidationError("Validation failed", err.flatten().fieldErrors),
-        );
+        next(new ValidationError("Validation failed", err.flatten().fieldErrors));
       } else {
         next(err);
       }
@@ -335,41 +444,13 @@ export class AppError extends Error {
   }
 }
 
-export class NotFoundError extends AppError {
-  constructor(m = "Not found") {
-    super(m, HttpStatus.NOT_FOUND);
-  }
-}
-export class UnauthorizedError extends AppError {
-  constructor(m = "Unauthorized") {
-    super(m, HttpStatus.UNAUTHORIZED);
-  }
-}
-export class ForbiddenError extends AppError {
-  constructor(m = "Forbidden") {
-    super(m, HttpStatus.FORBIDDEN);
-  }
-}
-export class ConflictError extends AppError {
-  constructor(m = "Conflict") {
-    super(m, HttpStatus.CONFLICT);
-  }
-}
-export class BadRequestError extends AppError {
-  constructor(m: string, d?: unknown) {
-    super(m, HttpStatus.BAD_REQUEST, d);
-  }
-}
-export class ValidationError extends AppError {
-  constructor(m: string, d?: unknown) {
-    super(m, HttpStatus.UNPROCESSABLE, d);
-  }
-}
-export class TooManyRequestsError extends AppError {
-  constructor(m = "Too many requests") {
-    super(m, HttpStatus.TOO_MANY_REQUESTS);
-  }
-}
+export class NotFoundError    extends AppError { constructor(m = "Not found")         { super(m, HttpStatus.NOT_FOUND); } }
+export class UnauthorizedError extends AppError { constructor(m = "Unauthorized")      { super(m, HttpStatus.UNAUTHORIZED); } }
+export class ForbiddenError    extends AppError { constructor(m = "Forbidden")         { super(m, HttpStatus.FORBIDDEN); } }
+export class ConflictError     extends AppError { constructor(m = "Conflict")          { super(m, HttpStatus.CONFLICT); } }
+export class BadRequestError   extends AppError { constructor(m: string, d?: unknown)  { super(m, HttpStatus.BAD_REQUEST, d); } }
+export class ValidationError   extends AppError { constructor(m: string, d?: unknown)  { super(m, HttpStatus.UNPROCESSABLE, d); } }
+export class TooManyRequestsError extends AppError { constructor(m = "Too many requests") { super(m, HttpStatus.TOO_MANY_REQUESTS); } }
 ```
 
 ```ts
@@ -378,19 +459,10 @@ import type { Request, Response, NextFunction } from "express";
 import { AppError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 
-export function globalErrorHandler(
-  err: unknown,
-  req: Request,
-  res: Response,
-  _next: NextFunction,
-): void {
+export function globalErrorHandler(err: unknown, req: Request, res: Response, _next: NextFunction): void {
   if (err instanceof AppError) {
     const level = err.statusCode >= 500 ? "error" : "warn";
-    logger[level](
-      { err, reqId: req.id, path: req.path, method: req.method },
-      err.message,
-    );
-
+    logger[level]({ err, reqId: req.id, path: req.path, method: req.method }, err.message);
     res.status(err.statusCode).json({
       success: false,
       error: err.message,
@@ -399,7 +471,6 @@ export function globalErrorHandler(
     });
     return;
   }
-
   logger.error({ err, reqId: req.id }, "Unhandled error");
   res.status(500).json({ success: false, error: "Internal server error" });
 }
@@ -409,45 +480,33 @@ export function globalErrorHandler(
 
 ## 5. Environment Config — Validated at Startup
 
-All environment variables are centralised and validated when the process starts. The app refuses to start if any required variable is missing or malformed.
-
 ```ts
 // config/index.ts
 import { z } from "zod";
 
 const schema = z.object({
-  NODE_ENV: z
-    .enum(["development", "test", "production"])
-    .default("development"),
-  PORT: z.coerce.number().default(3001),
-  DATABASE_URL: z.string().url(),
-  REDIS_URL: z.string().url().optional(),
-  JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters"),
+  NODE_ENV:       z.enum(["development", "test", "production"]).default("development"),
+  PORT:           z.coerce.number().default(3001),
+  DATABASE_URL:   z.string().url(),
+  REDIS_URL:      z.string().url().optional(),
+  JWT_SECRET:     z.string().min(32, "JWT_SECRET must be at least 32 characters"),
   JWT_EXPIRES_IN: z.string().default("7d"),
-  CORS_ORIGINS: z.string().transform((v) => v.split(",").map((s) => s.trim())),
-  LOG_LEVEL: z
-    .enum(["fatal", "error", "warn", "info", "debug", "trace"])
-    .default("info"),
-  BCRYPT_ROUNDS: z.coerce.number().min(10).default(12),
+  CORS_ORIGINS:   z.string().transform((v) => v.split(",").map((s) => s.trim())),
+  LOG_LEVEL:      z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
+  BCRYPT_ROUNDS:  z.coerce.number().min(10).default(12),
 });
 
 const result = schema.safeParse(process.env);
 
 if (!result.success) {
-  console.error(
-    "❌  Invalid environment variables:\n",
-    result.error.flatten().fieldErrors,
-  );
+  console.error("❌  Invalid environment variables:\n", result.error.flatten().fieldErrors);
   process.exit(1);
 }
 
 export const config = result.data;
 ```
 
-**Rules:**
-
-- `process.env` is never accessed directly anywhere except `config/index.ts`.
-- Every other file imports from `@/config`.
+**Rules:** `process.env` is never accessed directly anywhere except `config/index.ts`.
 
 ---
 
@@ -461,35 +520,26 @@ import { UnauthorizedError, ForbiddenError } from "@/lib/errors";
 import { config } from "@/config";
 
 export interface AppSession {
-  userId: string;
+  userId:   string;
   tenantId: string;
-  role: AppRole;
-  email: string;
+  role:     AppRole;
+  email:    string;
 }
 
-export type AppRole = "admin" | "manager" | "viewer"; // extend as needed
+export type AppRole = "admin" | "manager" | "viewer";
 
-// Augment Express Request type
 declare global {
   namespace Express {
     interface Request {
       session: AppSession;
-      id: string;
+      id:      string;
     }
   }
 }
 
-export function authenticate(
-  req: Request,
-  _res: Response,
-  next: NextFunction,
-): void {
+export function authenticate(req: Request, _res: Response, next: NextFunction): void {
   const header = req.headers.authorization;
-  if (!header?.startsWith("Bearer ")) {
-    return next(
-      new UnauthorizedError("Missing or malformed Authorization header"),
-    );
-  }
+  if (!header?.startsWith("Bearer ")) return next(new UnauthorizedError("Missing or malformed Authorization header"));
   try {
     req.session = jwt.verify(header.slice(7), config.JWT_SECRET) as AppSession;
     next();
@@ -500,11 +550,7 @@ export function authenticate(
 
 export function authorize(...roles: AppRole[]) {
   return (req: Request, _res: Response, next: NextFunction): void => {
-    if (!roles.includes(req.session.role)) {
-      return next(
-        new ForbiddenError(`Access requires role: ${roles.join(" or ")}`),
-      );
-    }
+    if (!roles.includes(req.session.role)) return next(new ForbiddenError(`Access requires role: ${roles.join(" or ")}`));
     next();
   };
 }
@@ -516,12 +562,12 @@ export function authorize(...roles: AppRole[]) {
 
 ```ts
 // lib/logger.ts
-import pino from "pino";
+import pino   from "pino";
 import { config } from "@/config";
 
 export const logger = pino({
   level: config.LOG_LEVEL,
-  base: { service: process.env.SERVICE_NAME ?? "api", env: config.NODE_ENV },
+  base:  { service: process.env.SERVICE_NAME ?? "api", env: config.NODE_ENV },
   timestamp: pino.stdTimeFunctions.isoTime,
   ...(config.NODE_ENV === "development" && {
     transport: { target: "pino-pretty", options: { colorize: true } },
@@ -530,11 +576,10 @@ export const logger = pino({
 ```
 
 **Logging rules:**
-
 - Log every create / update / delete with `{ entityId, tenantId, userId }`.
 - Log errors with the full `err` object and `reqId` for correlation.
 - **Never log passwords, raw tokens, credit card numbers, or PII** — log IDs only.
-- Use levels correctly: `info` for normal flow, `warn` for expected client errors, `error` for unexpected server errors, `debug` for development traces only.
+- Use levels correctly: `info` for normal flow, `warn` for expected client errors, `error` for unexpected server errors.
 
 ---
 
@@ -557,28 +602,10 @@ Every response follows this envelope — never deviate, never return naked array
 
 ```ts
 // types/index.ts
-export interface ApiResponse<T> {
-  success: true;
-  data: T;
-}
-export interface ApiListResponse<T> {
-  success: true;
-  data: T[];
-  total: number;
-  page: number;
-  limit: number;
-}
-export interface ApiError {
-  success: false;
-  error: string;
-  details?: unknown;
-}
-export interface Paginated<T> {
-  data: T[];
-  total: number;
-  page: number;
-  limit: number;
-}
+export interface ApiResponse<T>     { success: true; data: T; }
+export interface ApiListResponse<T> { success: true; data: T[]; total: number; page: number; limit: number; }
+export interface ApiError           { success: false; error: string; details?: unknown; }
+export interface Paginated<T>       { data: T[]; total: number; page: number; limit: number; }
 ```
 
 ---
@@ -587,67 +614,34 @@ export interface Paginated<T> {
 
 ```ts
 // server.ts
-import express from "express";
-import helmet from "helmet";
-import cors from "cors";
-import rateLimit from "express-rate-limit";
+import express    from "express";
+import helmet     from "helmet";
+import cors       from "cors";
+import rateLimit  from "express-rate-limit";
 import { v4 as uuid } from "uuid";
 import { config } from "@/config";
 import { globalErrorHandler } from "@/middleware/error.middleware";
 import { v1Router } from "@/api/v1";
-import { logger } from "@/lib/logger";
+import { logger }  from "@/lib/logger";
 
 export function createApp() {
   const app = express();
 
-  // ── Security headers ────────────────────────────────────────────────────
   app.use(helmet());
   app.use(cors({ origin: config.CORS_ORIGINS, credentials: true }));
-  app.set("trust proxy", 1); // required behind a load balancer / reverse proxy
-
-  // ── Request parsing ─────────────────────────────────────────────────────
+  app.set("trust proxy", 1);
   app.use(express.json({ limit: "1mb" }));
   app.use(express.urlencoded({ extended: true, limit: "1mb" }));
-
-  // ── Request ID (attach before any logging) ───────────────────────────────
-  app.use((req, _res, next) => {
-    req.id = uuid();
-    next();
-  });
-
-  // ── Rate limiting ────────────────────────────────────────────────────────
-  app.use(
-    rateLimit({
-      windowMs: 15 * 60 * 1000,
-      max: 500,
-      standardHeaders: true,
-      legacyHeaders: false,
-    }),
-  );
+  app.use((req, _res, next) => { req.id = uuid(); next(); });
+  app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 500, standardHeaders: true, legacyHeaders: false }));
   app.use("/api/v1/auth", rateLimit({ windowMs: 15 * 60 * 1000, max: 20 }));
-
-  // ── Routes ───────────────────────────────────────────────────────────────
   app.use("/api/v1", v1Router);
+  app.get("/health", (_req, res) => res.json({ status: "ok", ts: new Date().toISOString() }));
 
-  // ── Health check (no auth) ───────────────────────────────────────────────
-  app.get("/health", (_req, res) =>
-    res.json({ status: "ok", ts: new Date().toISOString() }),
-  );
-
-  // ── Global error handler (MUST be last) ─────────────────────────────────
-  app.use(globalErrorHandler);
-
+  app.use(globalErrorHandler);   // MUST be last
   return app;
 }
 ```
-
-**Security rules:**
-
-- Parameterised queries only — never concatenate user input into SQL strings.
-- Passwords hashed with `bcrypt` (rounds ≥ 12) or `argon2id` — never MD5, SHA-1, or SHA-256.
-- JWTs signed with HS256 minimum; RS256 / ES256 for multi-service architectures.
-- HTTP-only, `SameSite=Strict`, `Secure` cookies for session tokens.
-- All user input validated with Zod before it touches a controller.
 
 ---
 
@@ -656,22 +650,20 @@ export function createApp() {
 ```ts
 // jobs/[job-name].job.ts
 import { Queue, Worker, type Job } from 'bullmq';
-import { redis }   from '@/lib/cache/client';
-import { logger }  from '@/lib/logger';
+import { redis }  from '@/lib/cache/client';
+import { logger } from '@/lib/logger';
 
-// ── Queue (produce) ──────────────────────────────────────────────────────
 export const [jobName]Queue = new Queue('[job-name]', { connection: redis });
 
 export async function enqueue[JobName](payload: [JobName]Payload): Promise<void> {
   await [jobName]Queue.add('[job-name]', payload, {
-    attempts:    3,
-    backoff:     { type: 'exponential', delay: 5_000 },
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 5_000 },
     removeOnComplete: { count: 100 },
     removeOnFail:     { count: 500 },
   });
 }
 
-// ── Worker (consume) ─────────────────────────────────────────────────────
 export const [jobName]Worker = new Worker<[JobName]Payload>(
   '[job-name]',
   async (job: Job<[JobName]Payload>) => {
@@ -707,7 +699,6 @@ tests/
 ```
 
 **Rules:**
-
 - **Unit tests** — mock the repository; test service business rules in isolation.
 - **Integration tests** — spin up the real Express app + a dedicated test database; assert full HTTP responses end-to-end. Never mock the DB in integration tests.
 - Every new service method gets a unit test.
@@ -719,8 +710,8 @@ tests/
 
 Raise a flag and redesign if a requirement appears to demand any of these:
 
-- Put business logic in a controller (validate → decide → transform → that's the service)
-- Put DB queries in a service (any `db.` or ORM call → that's the repository)
+- Put business logic in a controller
+- Put DB queries in a service (any `db.` call → that's the repository)
 - Let a repository import HTTP status codes or reference `req` / `res`
 - Access `process.env` anywhere except `config/index.ts`
 - Concatenate user input into a SQL string — parameterised queries always
@@ -730,3 +721,168 @@ Raise a flag and redesign if a requirement appears to demand any of these:
 - Ship auth endpoints without rate limiting
 - Register the global error handler anywhere except last in `server.ts`
 - Use `as any` or suppress TypeScript errors with `// @ts-ignore`
+- **Write join logic across multiple tables in TypeScript — use a PostgreSQL view instead (see Section 13)**
+
+---
+
+## 13. DB View Protocol — Multi-Table Data Fetching
+
+### The Rule
+
+Whenever a response requires data from **more than one table**, the join logic lives in the database as a PostgreSQL view, not in TypeScript. The repository queries the view via Drizzle ORM. This is non-negotiable.
+
+**Bad (never do this):**
+```ts
+// ❌ Joining tables in TypeScript / Drizzle query builder
+const rows = await db
+  .select({ id: orders.id, customerName: customers.name, statusLabel: statuses.label })
+  .from(orders)
+  .innerJoin(customers, eq(orders.customerId, customers.id))
+  .innerJoin(statuses, eq(orders.statusId, statuses.id));
+```
+
+**Good:**
+```ts
+// ✅ Query a view — all join logic lives in PostgreSQL
+const rows = await db.select().from(orderSummaryView)
+  .where(eq(orderSummaryView.tenantId, tenantId));
+```
+
+### Decision Checklist Before Touching the Repository
+
+Before writing any repository method that fetches data, ask:
+
+1. **Does this fetch from more than one table?** → Must use a view.
+2. **Does a view already exist that covers (some of) these tables?** → Check `lib/db/schema/views/`. If yes, **ask the human** before creating a new one — the existing view may be extendable.
+3. **Can an existing view be extended (add columns, add a joined table)?** → Prefer extending over duplicating. Ask the human to confirm before changing a view that other repositories already use.
+4. **Is this genuinely new data that no existing view covers?** → Create a new view following the pattern below. Use the PostgreSQL DB skill to produce the migration SQL.
+
+> **When in doubt, ask.** Creating duplicate views or silently modifying shared views causes hidden regressions. Always surface the question.
+
+### Step-by-Step: Creating a New View
+
+**Step 1 — Write the SQL (use the PostgreSQL DB skill)**
+
+```sql
+-- lib/db/migrations/YYYYMMDD_create_[view_name]_view.sql
+CREATE OR REPLACE VIEW [view_name] AS
+SELECT
+  e.id,
+  e.tenant_id,
+  e.name,
+  e.slug,
+  e.created_by,
+  e.created_at,
+  e.updated_at,
+  e.deleted_at,
+  s.code   AS status,
+  s.label  AS status_label,
+  u.email  AS created_by_email,
+  t.name   AS tenant_name
+FROM [entity] e
+JOIN statuses  s ON s.id = e.status_id
+JOIN users     u ON u.id = e.created_by
+JOIN tenants   t ON t.id = e.tenant_id;
+
+-- Always add a comment describing the view's purpose
+COMMENT ON VIEW [view_name] IS 'Read-only projection of [entity] with status label, creator email, and tenant name. Used by [domain] API.';
+```
+
+**Step 2 — Register the view with Drizzle ORM**
+
+```ts
+// lib/db/schema/views/[view-name].view.ts
+import { pgView }   from 'drizzle-orm/pg-core';
+import { sql }      from 'drizzle-orm';
+
+// Mirror only the columns returned by the view — no extra columns, no guessing
+export const [viewName]View = pgView('[view_name]', {
+  id:             uuid('id'),
+  tenantId:       uuid('tenant_id'),
+  name:           varchar('name', { length: 200 }),
+  slug:           varchar('slug', { length: 100 }),
+  status:         varchar('status', { length: 50 }),
+  statusLabel:    varchar('status_label', { length: 100 }),
+  createdByEmail: varchar('created_by_email', { length: 320 }),
+  tenantName:     varchar('tenant_name', { length: 200 }),
+  createdAt:      timestamp('created_at'),
+  updatedAt:      timestamp('updated_at'),
+  deletedAt:      timestamp('deleted_at'),
+}).existing();
+// `.existing()` tells Drizzle this view already exists in the DB — do not try to create it via migrations
+```
+
+**Step 3 — Use it in the repository (reads only)**
+
+```ts
+// api/v1/[domain]/[domain].repository.ts
+import { [viewName]View } from '@/lib/db/schema/views/[view-name].view';
+import { [entity]Table }  from '@/lib/db/schema/tables/[entity].table';
+
+export class [Domain]Repository {
+  // READ — always from the view
+  async findMany(filters: ...) {
+    return db.select().from([viewName]View).where(...);
+  }
+
+  // WRITE — always to the base table
+  async create(input: ...) {
+    const [row] = await db.insert([entity]Table).values(input).returning({ id: [entity]Table.id });
+    return this.findById(row.id, input.tenantId);
+  }
+}
+```
+
+### Extending an Existing View
+
+If you need one more column from an existing view:
+
+1. **First, ask the human:** "The `order_summary` view already has customer and status data. I'd like to add `warehouse_name` from the `warehouses` table. Can I alter this view, or would you prefer I create a new `order_full_detail` view to avoid breaking other consumers?"
+2. If approved to extend: modify the SQL in `CREATE OR REPLACE VIEW` (PostgreSQL allows in-place replacement for non-breaking additions).
+3. Update the Drizzle view schema to include the new column.
+4. Grep for all other files importing that view and confirm no TypeScript types break.
+
+### View Naming Conventions
+
+| Pattern | Use for |
+|---|---|
+| `[entity]_summary` | Lightweight list view — joins status/label lookups only |
+| `[entity]_detail`  | Full-detail view — all related entities resolved |
+| `[entity]_[context]` | Context-specific projection (e.g. `order_billing`, `order_fulfillment`) |
+
+Never name a view after the table it reads from (e.g. `orders_view` is ambiguous). Name it after its purpose.
+
+### What Never Goes in a View
+
+- Aggregations that vary per request (user-specific counts, live totals) → compute in the service or use a materialized view with refresh strategy
+- Columns filtered by `tenantId` at the view level → always filter in the repository query, never bake tenancy into the view definition (it makes the view non-reusable)
+- Soft-delete filtering (`WHERE deleted_at IS NULL`) at the view level → same reason; let the repository apply it
+
+---
+
+## 14. Drizzle ORM — Table Schema Conventions
+
+```ts
+// lib/db/schema/tables/[entity].table.ts
+import { pgTable, uuid, varchar, timestamp, integer, jsonb } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+
+export const [entity]Table = pgTable('[entity]', {
+  id:         uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  tenantId:   uuid('tenant_id').notNull().references(() => tenantsTable.id),
+  name:       varchar('name', { length: 200 }).notNull(),
+  slug:       varchar('slug', { length: 100 }).notNull(),
+  statusId:   integer('status_id').notNull().references(() => statusesTable.id),
+  metadata:   jsonb('metadata'),
+  createdBy:  uuid('created_by').notNull().references(() => usersTable.id),
+  createdAt:  timestamp('created_at').notNull().defaultNow(),
+  updatedAt:  timestamp('updated_at').notNull().defaultNow(),
+  deletedAt:  timestamp('deleted_at'),
+});
+```
+
+**Rules:**
+- All column names in the database use `snake_case`; Drizzle maps them to `camelCase` in TypeScript.
+- Every table has `createdAt`, `updatedAt`, `deletedAt` (soft delete) and a `tenantId` foreign key.
+- Use `uuid` primary keys with `gen_random_uuid()` — never auto-increment integers for cross-service safety.
+- Never add computed or joined fields to a table schema — those belong in a view schema.

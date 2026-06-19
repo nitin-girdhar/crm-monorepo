@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
-import { withOrgTx, withServiceTx } from '@crm/db';
-import type { SqlParams } from '@crm/db';
+import { withRoleTx, withServiceTx } from '@crm/db';
+import type { SqlParams, RoleTxContext } from '@crm/db';
 import { config } from '../config.js';
 
 const ALLOWED_LOOKUP_TABLES = new Set(['user_roles']);
@@ -32,8 +32,15 @@ export interface CreateUserData {
   password: string;
 }
 
-export async function createUser(org_id: string, actor_user_id: string, data: CreateUserData) {
-  return withOrgTx(org_id, actor_user_id, async (tx) => {
+export async function createUser(
+  org_id: string,
+  actor_user_id: string,
+  data: CreateUserData,
+  role = 'org_admin',
+  tenant_id = '',
+) {
+  const ctx: RoleTxContext = { role, org_id, tenant_id, user_id: actor_user_id };
+  return withRoleTx(ctx, async (tx) => {
     const role_id = await resolveLookupId('user_roles', data.role_name);
     const password_hash = await bcrypt.hash(data.password, config.bcryptRounds);
 
@@ -57,7 +64,20 @@ export async function createUser(org_id: string, actor_user_id: string, data: Cr
         data.force_password_change ?? true,
       ],
     );
-    return rows[0] as unknown as { id: string };
+    const created = rows[0] as unknown as { id: string };
+
+    // Seed user_org_mapping so RLS and multi-org queries work immediately.
+    await tx.unsafe(
+      `INSERT INTO user_org_mapping (user_id, org_id, role_id, granted_by)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (user_id, org_id) DO UPDATE
+         SET role_id    = EXCLUDED.role_id,
+             is_active  = TRUE,
+             updated_at = CLOCK_TIMESTAMP()`,
+      [created.id, org_id, role_id, actor_user_id],
+    );
+
+    return created;
   });
 }
 
@@ -79,8 +99,11 @@ export async function updateUser(
   actor_user_id: string,
   target_user_id: string,
   data: UpdateUserData,
+  role = 'org_admin',
+  tenant_id = '',
 ) {
-  return withOrgTx(org_id, actor_user_id, async (tx) => {
+  const ctx: RoleTxContext = { role, org_id, tenant_id, user_id: actor_user_id };
+  return withRoleTx(ctx, async (tx) => {
     const sets: string[] = [];
     const params: unknown[] = [];
 
@@ -116,21 +139,45 @@ export async function updateUser(
     const rows = await tx.unsafe(
       `UPDATE users SET ${sets.join(', ')}
        WHERE id = $${params.length - 1} AND org_id = $${params.length} AND NOT is_deleted
-       RETURNING id, password_changed_at`,
+       RETURNING id, password_changed_at, role_id`,
       params as unknown as SqlParams,
     );
-    return (rows as unknown as Array<Record<string, unknown>>)[0] ?? null;
+    const updated = (rows as unknown as Array<Record<string, unknown>>)[0] ?? null;
+
+    // Keep user_org_mapping in sync when the role changes for this org.
+    if (updated && data.role_name !== undefined) {
+      await tx.unsafe(
+        `UPDATE user_org_mapping SET role_id = $1, updated_at = CLOCK_TIMESTAMP()
+         WHERE user_id = $2 AND org_id = $3`,
+        [updated['role_id'], target_user_id, org_id] as unknown as SqlParams,
+      );
+    }
+
+    return updated;
   });
 }
 
-export async function softDeleteUser(org_id: string, actor_user_id: string, target_user_id: string) {
-  return withOrgTx(org_id, actor_user_id, async (tx) => {
+export async function softDeleteUser(
+  org_id: string,
+  actor_user_id: string,
+  target_user_id: string,
+  role = 'org_admin',
+  tenant_id = '',
+) {
+  const ctx: RoleTxContext = { role, org_id, tenant_id, user_id: actor_user_id };
+  return withRoleTx(ctx, async (tx) => {
     await tx.unsafe(
       `UPDATE users
        SET is_deleted = TRUE, is_active = FALSE,
            deleted_at = CLOCK_TIMESTAMP(), deleted_by = $1::uuid
        WHERE id = $2 AND org_id = $3`,
       [actor_user_id, target_user_id, org_id],
+    );
+    // Revoke all org mappings so the user can no longer access any org.
+    await tx.unsafe(
+      `UPDATE user_org_mapping SET is_active = FALSE, updated_at = CLOCK_TIMESTAMP()
+       WHERE user_id = $1`,
+      [target_user_id],
     );
   });
 }
@@ -140,8 +187,11 @@ export async function adminResetPassword(
   actor_user_id: string,
   target_user_id: string,
   temporary_password: string,
+  role = 'org_admin',
+  tenant_id = '',
 ) {
-  return withOrgTx(org_id, actor_user_id, async (tx) => {
+  const ctx: RoleTxContext = { role, org_id, tenant_id, user_id: actor_user_id };
+  return withRoleTx(ctx, async (tx) => {
     const hash = await bcrypt.hash(temporary_password, config.bcryptRounds);
     const rows = await tx.unsafe(
       `UPDATE users

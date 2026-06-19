@@ -877,6 +877,12 @@ export default function LeadsTable({
       valueGetter: (p) => p.data?.phone ?? '',
     },
     {
+      colId: '__assignee', headerName: 'Assigned To', width: 170, minWidth: 130, sortable: true, filter: true, editable: false,
+      valueGetter: (p) => p.data?.assigned_rep_name ?? 'Unassigned',
+      cellRenderer: assigneeCellRenderer,
+      cellStyle: { display: 'flex', alignItems: 'center', paddingLeft: '12px', paddingRight: '12px' },
+    },
+    {
       colId: 'status', headerName: 'Status', width: 165, sortable: true, filter: true, editable: false,
       valueGetter: (p) => p.data?.stage ?? '',
       cellRenderer: (p: ICellRendererParams<LeadView>) => (
@@ -894,12 +900,6 @@ export default function LeadsTable({
           : <span className="text-xs text-[#CBD5E1]">—</span>;
       },
       cellStyle: { display: 'flex', alignItems: 'center' } as Record<string, string>,
-    },
-    {
-      colId: '__assignee', headerName: 'Assigned To', width: 170, minWidth: 130, sortable: true, filter: true, editable: false,
-      valueGetter: (p) => p.data?.assigned_rep_name ?? 'Unassigned',
-      cellRenderer: assigneeCellRenderer,
-      cellStyle: { display: 'flex', alignItems: 'center', paddingLeft: '12px', paddingRight: '12px' },
     },
     {
       colId: '__actions', headerName: '', width: 120, minWidth: 120, maxWidth: 120,

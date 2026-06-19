@@ -156,7 +156,7 @@ function StatCard({ label, count, total, iconBg, iconColor, icon, isHero, timeLa
 }
 
 interface Props {
-  stats: { total: number; lastUpdated: Date | null };
+  stats: { total: number; lastUpdated: Date | null; serverTotal: number };
   leads: LeadView[];
   requiresFollowupStatuses: string[];
   actor: SessionUser;
@@ -185,7 +185,7 @@ export default function StatsCards({ stats, leads, requiresFollowupStatuses, act
     };
   }, [leads, requiresFollowupStatuses, actor]);
 
-  const total = stats.total;
+  const total = stats.serverTotal;
 
   return (
     <div className="px-4 sm:px-5 py-1.5">

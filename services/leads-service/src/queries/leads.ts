@@ -1,5 +1,5 @@
-import { withOrgTx, withServiceTx } from '@crm/db';
-import type { Tx, SqlParams } from '@crm/db';
+import { withRoleTx, withServiceTx } from '@crm/db';
+import type { Tx, SqlParams, RoleTxContext } from '@crm/db';
 import { RANKS } from '@crm/permissions';
 
 async function buildLeadsQuery(
@@ -96,6 +96,8 @@ export async function getLeads(
     page_size?: number | undefined;
     org_ids?: string[] | undefined;
     actor_rank?: number | undefined;
+    role?: string | undefined;
+    tenant_id?: string | undefined;
   } = {},
 ) {
   const page = filters.page ?? 1;
@@ -103,14 +105,23 @@ export async function getLeads(
   const use_multi_org = Boolean(filters.org_ids && filters.org_ids.length > 0);
   const resolved = { ...filters, page, page_size, use_multi_org };
 
-  if (use_multi_org) {
-    return withServiceTx((tx) => buildLeadsQuery(tx, org_id, user_id, resolved));
-  }
-  return withOrgTx(org_id, user_id, (tx) => buildLeadsQuery(tx, org_id, user_id, resolved));
+  const ctx: RoleTxContext = {
+    role: filters.role ?? 'org_admin',
+    org_id,
+    tenant_id: filters.tenant_id ?? '',
+    user_id,
+  };
+  return withRoleTx(ctx, (tx) => buildLeadsQuery(tx, org_id, user_id, resolved));
 }
 
-export async function getLeadById(org_id: string, user_id: string, lead_id: string) {
-  return withOrgTx(org_id, user_id, async (tx) => {
+export async function getLeadById(
+  org_id: string,
+  user_id: string,
+  lead_id: string,
+  role = 'org_admin',
+  tenant_id = '',
+) {
+  return withRoleTx({ role, org_id, tenant_id, user_id }, async (tx) => {
     const rows = await tx.unsafe(
       `SELECT ml.id, ml.org_id, ml.first_name, ml.middle_name, ml.last_name, ml.full_name,
               ml.phone, ml.email, ml.city, ml.address_line1, ml.address_line2, ml.pincode,
@@ -149,8 +160,14 @@ export async function getLeadById(org_id: string, user_id: string, lead_id: stri
   });
 }
 
-export async function getLeadTimeline(org_id: string, user_id: string, lead_id: string) {
-  return withOrgTx(org_id, user_id, async (tx) => {
+export async function getLeadTimeline(
+  org_id: string,
+  user_id: string,
+  lead_id: string,
+  role = 'org_admin',
+  tenant_id = '',
+) {
+  return withRoleTx({ role, org_id, tenant_id, user_id }, async (tx) => {
     return tx.unsafe(
       `SELECT
          event_id          AS "eventId",
@@ -183,8 +200,14 @@ export async function getLeadTimeline(org_id: string, user_id: string, lead_id: 
   });
 }
 
-export async function getLeadInteractions(org_id: string, user_id: string, lead_id: string) {
-  return withOrgTx(org_id, user_id, async (tx) => {
+export async function getLeadInteractions(
+  org_id: string,
+  user_id: string,
+  lead_id: string,
+  role = 'org_admin',
+  tenant_id = '',
+) {
+  return withRoleTx({ role, org_id, tenant_id, user_id }, async (tx) => {
     return tx.unsafe(
       `SELECT li.*, u.full_name AS user_name, it.name AS interaction_type_name
        FROM lead_interactions li
@@ -197,8 +220,14 @@ export async function getLeadInteractions(org_id: string, user_id: string, lead_
   });
 }
 
-export async function getLeadAssignmentHistory(org_id: string, user_id: string, lead_id: string) {
-  return withOrgTx(org_id, user_id, async (tx) => {
+export async function getLeadAssignmentHistory(
+  org_id: string,
+  user_id: string,
+  lead_id: string,
+  role = 'org_admin',
+  tenant_id = '',
+) {
+  return withRoleTx({ role, org_id, tenant_id, user_id }, async (tx) => {
     return tx.unsafe(
       `SELECT log_id, lead_id, lead_full_name,
               assigned_by_name, assigned_by_email,
@@ -213,8 +242,14 @@ export async function getLeadAssignmentHistory(org_id: string, user_id: string, 
   });
 }
 
-export async function getLeadFollowUps(org_id: string, user_id: string, lead_id: string) {
-  return withOrgTx(org_id, user_id, async (tx) => {
+export async function getLeadFollowUps(
+  org_id: string,
+  user_id: string,
+  lead_id: string,
+  role = 'org_admin',
+  tenant_id = '',
+) {
+  return withRoleTx({ role, org_id, tenant_id, user_id }, async (tx) => {
     return tx.unsafe(
       `SELECT lf.*, u.full_name AS assigned_user_name, fs.name AS status_name, fs.label AS status_label
        FROM lead_follow_ups lf
@@ -233,9 +268,11 @@ export async function listFollowUps(
   filters: {
     assigned_rep_id?: string | undefined;
     overdue_only?: boolean | undefined;
+    role?: string | undefined;
+    tenant_id?: string | undefined;
   },
 ) {
-  return withOrgTx(org_id, user_id, async (tx) => {
+  return withRoleTx({ role: filters.role ?? 'org_admin', org_id, tenant_id: filters.tenant_id ?? '', user_id }, async (tx) => {
     const conditions: string[] = [
       'NOT lf.is_deleted',
       'NOT ml.is_deleted',

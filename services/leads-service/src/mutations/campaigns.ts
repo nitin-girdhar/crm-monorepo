@@ -1,5 +1,5 @@
-import { withOrgTx } from '@crm/db';
-import type { Tx, SqlParams } from '@crm/db';
+import { withRoleTx } from '@crm/db';
+import type { Tx, SqlParams, RoleTxContext } from '@crm/db';
 
 const ALLOWED_LOOKUP_TABLES = new Set(['marketing_platforms', 'campaign_statuses']);
 
@@ -20,8 +20,11 @@ export async function createCampaign(
   org_id: string,
   user_id: string,
   data: Record<string, unknown>,
+  role = 'org_admin',
+  tenant_id = '',
 ) {
-  return withOrgTx(org_id, user_id, async (tx) => {
+  const ctx: RoleTxContext = { role, org_id, tenant_id, user_id };
+  return withRoleTx(ctx, async (tx) => {
     const platform_id = await resolveLookupId(tx, 'marketing_platforms', String(data['platform_name'] ?? ''));
     const status_id = await resolveLookupId(tx, 'campaign_statuses', String(data['status_name'] ?? 'draft'));
 
@@ -48,8 +51,11 @@ export async function updateCampaign(
   user_id: string,
   campaign_id: string,
   data: Record<string, unknown>,
+  role = 'org_admin',
+  tenant_id = '',
 ) {
-  return withOrgTx(org_id, user_id, async (tx) => {
+  const ctx: RoleTxContext = { role, org_id, tenant_id, user_id };
+  return withRoleTx(ctx, async (tx) => {
     const sets: string[] = [];
     const params: unknown[] = [];
 
@@ -85,8 +91,15 @@ export async function updateCampaign(
   });
 }
 
-export async function deleteCampaign(org_id: string, user_id: string, campaign_id: string) {
-  return withOrgTx(org_id, user_id, async (tx) => {
+export async function deleteCampaign(
+  org_id: string,
+  user_id: string,
+  campaign_id: string,
+  role = 'org_admin',
+  tenant_id = '',
+) {
+  const ctx: RoleTxContext = { role, org_id, tenant_id, user_id };
+  return withRoleTx(ctx, async (tx) => {
     await tx.unsafe(
       `UPDATE ad_campaigns
        SET is_deleted = TRUE, deleted_at = CLOCK_TIMESTAMP(), deleted_by = $1::uuid

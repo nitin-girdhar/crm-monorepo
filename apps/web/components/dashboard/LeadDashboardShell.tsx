@@ -205,7 +205,7 @@ export default function LeadDashboardShell({ actor }: Props) {
           <span className="shrink-0 text-sm font-semibold text-[#0F172A]">{branchLabel}</span>
           {!loading && (
             <span className="shrink-0 rounded-full border border-[#E2E8F0] bg-[#F1F5F9] px-2 py-0.5 text-xs font-medium tabular-nums text-[#64748B]">
-              {leads.length} total
+              {stats.serverTotal} total
             </span>
           )}
           {activeFilter !== 'all' && (

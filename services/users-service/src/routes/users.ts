@@ -28,13 +28,15 @@ export async function usersRoutes(app: FastifyInstance): Promise<void> {
   app.get('/users', async (request, reply) => {
     const org_id = request.headers['x-org-id'] as string;
     const user_id = request.headers['x-user-id'] as string;
+    const role = (request.headers['x-user-role'] as string) || 'org_admin';
+    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
     if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
 
     const qs = request.query as Record<string, string>;
     const page = qs['page'] ? parseInt(qs['page'], 10) : 1;
     const page_size = Math.min(qs['page_size'] ? parseInt(qs['page_size'], 10) : 100, 500);
 
-    const result = await listUsers(org_id, user_id, page, page_size);
+    const result = await listUsers(org_id, user_id, page, page_size, role, tenant_id);
     const users = (result.users as Record<string, unknown>[]).map(toUserView);
     return reply.status(200).send({ users, total: result.total, page: result.page, page_size: result.page_size });
   });
@@ -43,6 +45,8 @@ export async function usersRoutes(app: FastifyInstance): Promise<void> {
     const org_id = request.headers['x-org-id'] as string;
     const user_id = request.headers['x-user-id'] as string;
     const user_rank = parseInt(request.headers['x-rank'] as string ?? '0', 10);
+    const role = (request.headers['x-user-role'] as string) || 'org_admin';
+    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
     if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
 
     if (user_rank < RANKS.SSE) {
@@ -61,7 +65,7 @@ export async function usersRoutes(app: FastifyInstance): Promise<void> {
         ...parsed.data,
         password: temporary_password,
         force_password_change: parsed.data.force_password_change ?? true,
-      });
+      }, role, tenant_id);
       await logActivity({
         action_type: 'user_created',
         performed_by: user_id,
@@ -82,9 +86,11 @@ export async function usersRoutes(app: FastifyInstance): Promise<void> {
     const org_id = request.headers['x-org-id'] as string;
     const user_id = request.headers['x-user-id'] as string;
     const user_rank = parseInt(request.headers['x-rank'] as string ?? '0', 10);
+    const role = (request.headers['x-user-role'] as string) || 'org_admin';
+    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
     if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
 
-    const rows = await getAssignableUsers(org_id, user_id, user_rank);
+    const rows = await getAssignableUsers(org_id, user_id, user_rank, role, tenant_id);
     const users = (rows as Array<Record<string, unknown>>).map(toUserView);
     return reply.status(200).send({ users });
   });
@@ -92,28 +98,34 @@ export async function usersRoutes(app: FastifyInstance): Promise<void> {
   app.get('/users/team', async (request, reply) => {
     const org_id = request.headers['x-org-id'] as string;
     const user_id = request.headers['x-user-id'] as string;
+    const role = (request.headers['x-user-role'] as string) || 'org_admin';
+    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
     if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
 
-    const members = await getTeamMembers(org_id, user_id);
+    const members = await getTeamMembers(org_id, user_id, role, tenant_id);
     return reply.status(200).send({ members });
   });
 
   app.get('/users/org-chart', async (request, reply) => {
     const org_id = request.headers['x-org-id'] as string;
     const user_id = request.headers['x-user-id'] as string;
+    const role = (request.headers['x-user-role'] as string) || 'org_admin';
+    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
     if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
 
-    const chart = await getOrgChart(org_id, user_id);
+    const chart = await getOrgChart(org_id, user_id, role, tenant_id);
     return reply.status(200).send({ chart });
   });
 
   app.get('/users/:id', async (request, reply) => {
     const org_id = request.headers['x-org-id'] as string;
     const user_id = request.headers['x-user-id'] as string;
+    const role = (request.headers['x-user-role'] as string) || 'org_admin';
+    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
     if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
 
     const { id } = request.params as { id: string };
-    const user = await getUserById(org_id, user_id, id);
+    const user = await getUserById(org_id, user_id, id, role, tenant_id);
     if (!user) return reply.status(404).send({ error: 'User not found' });
 
     return reply.status(200).send({ user: toUserView(user as Record<string, unknown>) });
@@ -122,6 +134,8 @@ export async function usersRoutes(app: FastifyInstance): Promise<void> {
   app.patch('/users/:id', async (request, reply) => {
     const org_id = request.headers['x-org-id'] as string;
     const user_id = request.headers['x-user-id'] as string;
+    const role = (request.headers['x-user-role'] as string) || 'org_admin';
+    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
     if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
 
     const { id } = request.params as { id: string };
@@ -132,7 +146,7 @@ export async function usersRoutes(app: FastifyInstance): Promise<void> {
 
     const before_user = await getUserByIdAsService(id);
     const target_org_id = (before_user as Record<string, unknown> | null)?.['org_id'] as string ?? org_id;
-    const result = await updateUser(target_org_id, user_id, id, parsed.data);
+    const result = await updateUser(target_org_id, user_id, id, parsed.data, role, tenant_id);
     if (!result) return reply.status(404).send({ error: 'User not found' });
 
     if (parsed.data.is_active === false) {
@@ -158,11 +172,13 @@ export async function usersRoutes(app: FastifyInstance): Promise<void> {
     const org_id = request.headers['x-org-id'] as string;
     const user_id = request.headers['x-user-id'] as string;
     const user_rank = parseInt(request.headers['x-rank'] as string ?? '0', 10);
+    const role = (request.headers['x-user-role'] as string) || 'org_admin';
+    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
     if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
     if (user_rank < RANKS.ADMIN) return reply.status(403).send({ error: 'Forbidden' });
 
     const { id } = request.params as { id: string };
-    await softDeleteUser(org_id, user_id, id);
+    await softDeleteUser(org_id, user_id, id, role, tenant_id);
     await logActivity({ action_type: 'user_deactivated', performed_by: user_id, subject_user_id: id });
     return reply.status(200).send({ ok: true });
   });
@@ -171,6 +187,8 @@ export async function usersRoutes(app: FastifyInstance): Promise<void> {
     const org_id = request.headers['x-org-id'] as string;
     const user_id = request.headers['x-user-id'] as string;
     const user_rank = parseInt(request.headers['x-rank'] as string ?? '0', 10);
+    const role = (request.headers['x-user-role'] as string) || 'org_admin';
+    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
     if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
     if (user_rank < RANKS.ADMIN) return reply.status(403).send({ error: 'Only admins can reset passwords' });
 
@@ -181,7 +199,7 @@ export async function usersRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const temporary_password = parsed.data.new_password ?? generateTemporaryPassword();
-    const result = await adminResetPassword(org_id, user_id, id, temporary_password);
+    const result = await adminResetPassword(org_id, user_id, id, temporary_password, role, tenant_id);
     if (!result) return reply.status(404).send({ error: 'User not found' });
 
     await logActivity({

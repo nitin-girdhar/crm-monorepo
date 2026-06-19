@@ -9,6 +9,7 @@ export interface SessionUser {
   rank: number;
   org_id: string;
   org_name: string;
+  tenant_id: string;
   tenant_name: string;
   role_label: string;
   name: string;
@@ -29,6 +30,7 @@ export interface JwtPayload {
   role: UserRole;
   rank: number;
   org_id: string;
+  tenant_id: string;
   pwd_iat: number;
   jti: string;
   iat?: number;
