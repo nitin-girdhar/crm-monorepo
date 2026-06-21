@@ -44,7 +44,8 @@ export default function AnalyticsClient({ actorRank, orgId }: Props) {
   });
 
   const isTenantAdmin = actorRank >= 90;
-  const pipeline = (pipelineData ?? []) as PipelineStage[];
+  const pipeline = (pipelineData?.data ?? []) as PipelineStage[];
+  const dashboardData = data?.data;
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
@@ -58,9 +59,9 @@ export default function AnalyticsClient({ actorRank, orgId }: Props) {
           Loading…
         </div>
       ) : isTenantAdmin ? (
-        <TenantView rows={(data ?? []) as TenantRow[]} pipeline={pipeline} />
+        <TenantView rows={(dashboardData ?? []) as TenantRow[]} pipeline={pipeline} />
       ) : (
-        <OrgView snapshot={data as OrgSnapshot | null} pipeline={pipeline} />
+        <OrgView snapshot={dashboardData as OrgSnapshot | null} pipeline={pipeline} />
       )}
     </div>
   );

@@ -56,3 +56,56 @@ export const updateLeadSchema = z.object({
 
 export type CreateLeadInput = z.infer<typeof createLeadSchema>;
 export type UpdateLeadInput = z.infer<typeof updateLeadSchema>;
+
+export const createInteractionSchema = z.object({
+  interaction_type: z.string().min(1).max(50).optional(),
+  notes: z.string().max(5000).optional(),
+  occurred_at: z.string().datetime({ offset: true }).optional(),
+}).refine(
+  (d) => Boolean(d.interaction_type ?? d.notes),
+  { message: 'At least one of interaction_type or notes is required' },
+);
+
+export type CreateInteractionInput = z.infer<typeof createInteractionSchema>;
+
+export const createFollowUpSchema = z.object({
+  assigned_user_id: z.string().uuid('Invalid assigned_user_id').optional(),
+  scheduled_at: z.string().datetime({ offset: true }),
+  notes: z.string().max(5000).optional(),
+});
+
+export type CreateFollowUpInput = z.infer<typeof createFollowUpSchema>;
+
+export const updateFollowUpSchema = z.object({
+  action: z.enum(['complete', 'reschedule', 'add_note']).optional(),
+  status_name: z.string().max(50).optional(),
+  completed_at: z.string().datetime({ offset: true }).optional(),
+  scheduled_at: z.string().datetime({ offset: true }).optional(),
+  notes: z.string().max(5000).optional(),
+});
+
+export type UpdateFollowUpInput = z.infer<typeof updateFollowUpSchema>;
+
+export const createCampaignSchema = z.object({
+  name: z.string().min(1).max(255),
+  platform_name: z.string().min(1).max(100),
+  status_name: z.string().max(50).optional(),
+  budget: z.number().nonnegative().optional(),
+  started_at: z.string().datetime({ offset: true }).optional(),
+  ended_at: z.string().datetime({ offset: true }).optional(),
+});
+
+export const updateCampaignSchema = z.object({
+  name: z.string().min(1).max(255).optional(),
+  platform_name: z.string().max(100).optional(),
+  status_name: z.string().max(50).optional(),
+  budget: z.number().nonnegative().optional(),
+  started_at: z.string().datetime({ offset: true }).optional().nullable(),
+  ended_at: z.string().datetime({ offset: true }).optional().nullable(),
+}).refine(
+  (d) => Object.keys(d).length > 0,
+  { message: 'At least one field must be provided to update' },
+);
+
+export type CreateCampaignInput = z.infer<typeof createCampaignSchema>;
+export type UpdateCampaignInput = z.infer<typeof updateCampaignSchema>;

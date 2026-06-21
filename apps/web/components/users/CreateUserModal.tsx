@@ -107,18 +107,18 @@ export default function CreateUserModal({ open, onClose, actorRank, users, actor
         body: JSON.stringify(body),
       });
       const data = (await res.json().catch(() => null)) as
-        | { user?: { email: string }; temporaryPassword?: string; error?: string; details?: Array<{ path: string[]; message: string }> }
+        | { success: boolean; data?: { id: string; email: string }; temporary_password?: string; error?: string; details?: Array<{ path: string[]; message: string }> }
         | null;
       if (!res.ok) {
         const detail = data?.details?.map((d) => `${d.path.join('.')}: ${d.message}`).join('; ');
         setError(detail || data?.error || 'Failed to create user.');
         return;
       }
-      if (!data?.temporaryPassword || !data.user?.email) {
+      if (!data?.temporary_password || !data.data?.email) {
         setError('Unexpected response from server.');
         return;
       }
-      setSuccess({ email: data.user.email, temporaryPassword: data.temporaryPassword });
+      setSuccess({ email: data.data.email, temporaryPassword: data.temporary_password });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Network error.');
     } finally {

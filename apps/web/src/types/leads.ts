@@ -1,18 +1,23 @@
 export interface AssignmentView {
   id: string;
   lead_id: string;
-  lead_name: string | null;
+  lead_full_name: string | null;
   lead_phone: string | null;
+  lead_email: string | null;
+  lead_stage: string | null;
+  lead_stage_label: string | null;
+  lead_stage_outcome: string | null;
+  lead_stage_outcome_label: string | null;
+  lead_created_at: string;
+  is_terminated: boolean;
   branch: string;
+  org_id: string;
   assigned_to: string;
-  assigned_by: string;
+  assigned_rep_name: string | null;
+  assigned_rep_email: string | null;
+  assigned_rep_role: string | null;
   assigned_at: string;
-  notes: string | null;
-  assignee_name: string | null;
-  assignee_email: string | null;
-  assignee_role: string | null;
   duplicate_lead_id: string | null;
-  duplicate_lead_platform: string | null;
 }
 
 export interface StatsData {

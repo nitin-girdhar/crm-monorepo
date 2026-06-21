@@ -4,24 +4,24 @@
 -- CRM Monorepo — Merged Production Schema
 -- Combines: monorepo UUID-based design + EXISTING_WORKING_CODE features
 -- UUID PKs for all operational/lookup tables
--- SMALLINT/INTEGER PKs for geographic tables (countries/states/cities)
+-- SMALLINT/INTEGER PKs for geographic tables (geo.countries/states/cities)
 -- Idempotent: safe to re-run (IF NOT EXISTS, ON CONFLICT DO NOTHING)
 -- ===================================================================
 
 
 -- ── Schema version tracking ────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS schema_versions (
+CREATE TABLE IF NOT EXISTS public.schema_versions (
   version     TEXT        PRIMARY KEY,
   description TEXT,
   applied_at  TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP()
 );
-INSERT INTO schema_versions (version, description) VALUES
+INSERT INTO public.schema_versions (version, description) VALUES
   ('1.0.0', 'Merged monorepo + EXISTING_WORKING_CODE: geo tables, soft-delete, business-rule triggers, audit triggers, service logins'),
-  ('1.1.0', 'user_org_mapping table, legal_entity_name/brand_name on organizations, fixed multi-org RLS gaps')
+  ('1.1.0', 'iam.user_org_mapping table, legal_entity_name/brand_name on entity.organizations, fixed multi-org RLS gaps')
 ON CONFLICT (version) DO NOTHING;
 
 -- ── Extensions ─────────────────────────────────────────────────────
-CREATE EXTENSION IF NOT EXISTS pgcrypto;   -- gen_random_bytes() used by gen_uuidv7()
+CREATE EXTENSION IF NOT EXISTS pgcrypto;   -- gen_random_bytes() used by public.gen_uuidv7()
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE EXTENSION IF NOT EXISTS btree_gin;
 
@@ -33,11 +33,20 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
+-- ── Schemas ────────────────────────────────────────────────────────
+CREATE SCHEMA IF NOT EXISTS geo;
+CREATE SCHEMA IF NOT EXISTS entity;
+CREATE SCHEMA IF NOT EXISTS iam;
+CREATE SCHEMA IF NOT EXISTS crm;
+CREATE SCHEMA IF NOT EXISTS marketing;
+CREATE SCHEMA IF NOT EXISTS audit;
+CREATE SCHEMA IF NOT EXISTS ext;
+
 -- ── UUIDv7 generator (RFC 9562 §5.7) ──────────────────────────────
 -- Time-ordered UUIDs: 48-bit ms timestamp prefix eliminates the
--- random-insert B-tree fragmentation caused by gen_uuidv7() (v4).
+-- random-insert B-tree fragmentation caused by public.gen_uuidv7() (v4).
 -- Works on PostgreSQL 14+ with no extensions required.
-CREATE OR REPLACE FUNCTION gen_uuidv7() RETURNS UUID
+CREATE OR REPLACE FUNCTION public.gen_uuidv7() RETURNS UUID
 LANGUAGE plpgsql AS $$
 DECLARE
   v_millis BIGINT;
@@ -97,44 +106,44 @@ END $$;
 -- ===================================================================
 -- GEOGRAPHIC LOOKUP TABLES
 -- SMALLINT/INTEGER PKs (GENERATED ALWAYS AS IDENTITY) — high-cardinality
--- safe with SMALLINT for countries/states; INTEGER for cities.
+-- safe with SMALLINT for geo.countries/states; INTEGER for geo.cities.
 -- ===================================================================
 
-CREATE TABLE IF NOT EXISTS countries (
+CREATE TABLE IF NOT EXISTS geo.countries (
   id       SMALLINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
   name     TEXT     NOT NULL UNIQUE,
   iso_code CHAR(2)  NOT NULL UNIQUE,
   description TEXT
 );
 
-CREATE TABLE IF NOT EXISTS states (
+CREATE TABLE IF NOT EXISTS geo.states (
   id         SMALLINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-  country_id SMALLINT NOT NULL REFERENCES countries(id) ON DELETE RESTRICT,
+  country_id SMALLINT NOT NULL REFERENCES geo.countries(id) ON DELETE RESTRICT,
   name       TEXT     NOT NULL,
   code       TEXT,
   description TEXT,
   CONSTRAINT uq_states_country_name UNIQUE (country_id, name)
 );
 
-CREATE TABLE IF NOT EXISTS cities (
+CREATE TABLE IF NOT EXISTS geo.cities (
   id          INTEGER  PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-  state_id    SMALLINT NOT NULL REFERENCES states(id) ON DELETE RESTRICT,
+  state_id    SMALLINT NOT NULL REFERENCES geo.states(id) ON DELETE RESTRICT,
   name        TEXT     NOT NULL,
   description TEXT,
   CONSTRAINT uq_cities_state_name UNIQUE (state_id, name)
 );
 
 -- ── Geographic seed data ────────────────────────────────────────────
-INSERT INTO countries (name, iso_code) VALUES
+INSERT INTO geo.countries (name, iso_code) VALUES
   ('India',                'IN'),
   ('United States',        'US'),
   ('United Kingdom',       'GB'),
   ('United Arab Emirates', 'AE')
 ON CONFLICT (name) DO NOTHING;
 
-INSERT INTO states (country_id, name, code)
+INSERT INTO geo.states (country_id, name, code)
 SELECT c.id, s.name, s.code
-FROM countries c
+FROM geo.countries c
 CROSS JOIN (VALUES
   ('Delhi',           'DL'),
   ('Maharashtra',     'MH'),
@@ -152,9 +161,9 @@ CROSS JOIN (VALUES
 WHERE c.iso_code = 'IN'
 ON CONFLICT (country_id, name) DO NOTHING;
 
-INSERT INTO cities (state_id, name)
+INSERT INTO geo.cities (state_id, name)
 SELECT s.id, c.name
-FROM states s
+FROM geo.states s
 CROSS JOIN (VALUES
   ('Delhi',         'New Delhi'),
   ('Delhi',         'Dwarka'),
@@ -178,15 +187,15 @@ ON CONFLICT (state_id, name) DO NOTHING;
 -- OPERATIONAL LOOKUP TABLES  (UUID PKs)
 -- ===================================================================
 
-CREATE TABLE IF NOT EXISTS user_roles (
-  id          UUID     PRIMARY KEY DEFAULT gen_uuidv7(),
+CREATE TABLE IF NOT EXISTS iam.user_roles (
+  id          UUID     PRIMARY KEY DEFAULT public.gen_uuidv7(),
   name        TEXT     NOT NULL UNIQUE,
   label       TEXT     NOT NULL,
   description TEXT,
   rank        INT      NOT NULL DEFAULT 0
                        CONSTRAINT chk_user_roles_rank CHECK (rank >= 0 AND rank <= 100)
 );
-INSERT INTO user_roles (name, label, description, rank) VALUES
+INSERT INTO iam.user_roles (name, label, description, rank) VALUES
   ('read_only',               'Read Only',              'Read-only viewer — dashboards and reports only',                                    0),
   ('sales_representative',    'Sales Representative',   'Front-line sales — manages own assigned leads and follow-ups',                     20),
   ('senior_sales_executive',  'Senior Sales Executive', 'Senior Sales Executive — manages a team of sales reps; reports to org_manager',    40),
@@ -200,8 +209,8 @@ ON CONFLICT (name) DO UPDATE SET
   description = EXCLUDED.description,
   rank        = EXCLUDED.rank;
 
-CREATE TABLE IF NOT EXISTS lead_stage (
-  id                UUID    PRIMARY KEY DEFAULT gen_uuidv7(),
+CREATE TABLE IF NOT EXISTS crm.lead_stage (
+  id                UUID    PRIMARY KEY DEFAULT public.gen_uuidv7(),
   name              TEXT    NOT NULL UNIQUE,
   label             TEXT    NOT NULL,
   description       TEXT,
@@ -210,7 +219,7 @@ CREATE TABLE IF NOT EXISTS lead_stage (
   is_rejected       BOOLEAN NOT NULL DEFAULT FALSE,
   is_terminated     BOOLEAN NOT NULL DEFAULT FALSE
 );
-INSERT INTO lead_stage (name, label, description, sort_order, followup_required, is_rejected, is_terminated) VALUES
+INSERT INTO crm.lead_stage (name, label, description, sort_order, followup_required, is_rejected, is_terminated) VALUES
   ('new',            'New',            'Lead just received — not yet contacted',                       1, FALSE, FALSE, FALSE),
   ('contacting',     'Contacting',     'Active outreach in progress — calls, WhatsApp, or email',      2, TRUE,  FALSE, FALSE),
   ('qualified',      'Qualified',      'Lead confirmed as a genuine prospect with intent and budget',  3, TRUE,  FALSE, FALSE),
@@ -225,9 +234,9 @@ ON CONFLICT (name) DO UPDATE SET
   is_rejected       = EXCLUDED.is_rejected,
   is_terminated     = EXCLUDED.is_terminated;
 
-CREATE TABLE IF NOT EXISTS lead_stage_outcome (
-  id               UUID    PRIMARY KEY DEFAULT gen_uuidv7(),
-  stage_id         UUID    NOT NULL REFERENCES lead_stage(id) ON DELETE RESTRICT,
+CREATE TABLE IF NOT EXISTS crm.lead_stage_outcome (
+  id               UUID    PRIMARY KEY DEFAULT public.gen_uuidv7(),
+  stage_id         UUID    NOT NULL REFERENCES crm.lead_stage(id) ON DELETE RESTRICT,
   name             TEXT    NOT NULL,
   label            TEXT    NOT NULL,
   description      TEXT,
@@ -245,14 +254,14 @@ DECLARE
   v_unqualified UUID;
   v_transferred UUID;
 BEGIN
-  SELECT id INTO v_contacting  FROM lead_stage WHERE name = 'contacting';
-  SELECT id INTO v_qualified   FROM lead_stage WHERE name = 'qualified';
-  SELECT id INTO v_converted   FROM lead_stage WHERE name = 'converted';
-  SELECT id INTO v_unqualified FROM lead_stage WHERE name = 'unqualified';
-  SELECT id INTO v_transferred FROM lead_stage WHERE name = 'transferred_out';
+  SELECT id INTO v_contacting  FROM crm.lead_stage WHERE name = 'contacting';
+  SELECT id INTO v_qualified   FROM crm.lead_stage WHERE name = 'qualified';
+  SELECT id INTO v_converted   FROM crm.lead_stage WHERE name = 'converted';
+  SELECT id INTO v_unqualified FROM crm.lead_stage WHERE name = 'unqualified';
+  SELECT id INTO v_transferred FROM crm.lead_stage WHERE name = 'transferred_out';
 
   -- contacting outcomes
-  INSERT INTO lead_stage_outcome (stage_id, name, label, sort_order) VALUES
+  INSERT INTO crm.lead_stage_outcome (stage_id, name, label, sort_order) VALUES
     (v_contacting, 'not_connected',   'Not Connected',   1),
     (v_contacting, 'switch_off',      'Switch Off',      2),
     (v_contacting, 'not_answered',    'Not Answered',    3),
@@ -260,18 +269,18 @@ BEGIN
   ON CONFLICT (stage_id, name) DO NOTHING;
 
   -- qualified outcomes
-  INSERT INTO lead_stage_outcome (stage_id, name, label, sort_order) VALUES
+  INSERT INTO crm.lead_stage_outcome (stage_id, name, label, sort_order) VALUES
     (v_qualified, 'visit_scheduled', 'Visit Scheduled', 1),
     (v_qualified, 'visited',         'Visited',         2)
   ON CONFLICT (stage_id, name) DO NOTHING;
 
   -- converted outcomes
-  INSERT INTO lead_stage_outcome (stage_id, name, label, sort_order) VALUES
+  INSERT INTO crm.lead_stage_outcome (stage_id, name, label, sort_order) VALUES
     (v_converted, 'membership_sold', 'Membership Sold', 1)
   ON CONFLICT (stage_id, name) DO NOTHING;
 
   -- unqualified outcomes
-  INSERT INTO lead_stage_outcome (stage_id, name, label, requires_comment, sort_order) VALUES
+  INSERT INTO crm.lead_stage_outcome (stage_id, name, label, requires_comment, sort_order) VALUES
     (v_unqualified, 'no_response_after_multiple_attempts', 'No Response After Multiple Attempts', FALSE, 1),
     (v_unqualified, 'wrong_number',                        'Wrong Number',                        FALSE, 2),
     (v_unqualified, 'job_applicant',                       'Job Applicant',                       FALSE, 3),
@@ -283,18 +292,18 @@ BEGIN
   ON CONFLICT (stage_id, name) DO NOTHING;
 
   -- transferred_out outcomes
-  INSERT INTO lead_stage_outcome (stage_id, name, label, sort_order) VALUES
+  INSERT INTO crm.lead_stage_outcome (stage_id, name, label, sort_order) VALUES
     (v_transferred, 'transferred_to_other_branch', 'Transferred to Other Branch', 1)
   ON CONFLICT (stage_id, name) DO NOTHING;
 END;
 $$;
 
-CREATE TABLE IF NOT EXISTS interaction_types (
-  id          UUID PRIMARY KEY DEFAULT gen_uuidv7(),
+CREATE TABLE IF NOT EXISTS crm.interaction_types (
+  id          UUID PRIMARY KEY DEFAULT public.gen_uuidv7(),
   name        TEXT NOT NULL UNIQUE,
   description TEXT
 );
-INSERT INTO interaction_types (name, description) VALUES
+INSERT INTO crm.interaction_types (name, description) VALUES
   ('call',          'Outbound or inbound phone call'),
   ('whatsapp',      'WhatsApp message (text, audio, or media)'),
   ('email',         'Email sent or received'),
@@ -305,25 +314,25 @@ INSERT INTO interaction_types (name, description) VALUES
   ('internal_note', 'Internal note or annotation added by a team member')
 ON CONFLICT (name) DO NOTHING;
 
-CREATE TABLE IF NOT EXISTS follow_up_statuses (
-  id          UUID PRIMARY KEY DEFAULT gen_uuidv7(),
+CREATE TABLE IF NOT EXISTS crm.follow_up_statuses (
+  id          UUID PRIMARY KEY DEFAULT public.gen_uuidv7(),
   name        TEXT NOT NULL UNIQUE,
   label       TEXT NOT NULL,
   description TEXT
 );
-INSERT INTO follow_up_statuses (name, label, description) VALUES
+INSERT INTO crm.follow_up_statuses (name, label, description) VALUES
   ('pending',     'Pending',     'Follow-up scheduled and not yet actioned'),
   ('completed',   'Completed',   'Follow-up actioned within the scheduled window'),
   ('missed',      'Missed',      'Follow-up was not actioned before the scheduled time'),
   ('rescheduled', 'Rescheduled', 'Follow-up postponed to a new scheduled_at datetime')
 ON CONFLICT (name) DO NOTHING;
 
-CREATE TABLE IF NOT EXISTS marketing_platforms (
-  id          UUID PRIMARY KEY DEFAULT gen_uuidv7(),
+CREATE TABLE IF NOT EXISTS marketing.marketing_platforms (
+  id          UUID PRIMARY KEY DEFAULT public.gen_uuidv7(),
   name        TEXT NOT NULL UNIQUE,
   description TEXT
 );
-INSERT INTO marketing_platforms (name, description) VALUES
+INSERT INTO marketing.marketing_platforms (name, description) VALUES
   ('facebook',     'Facebook / Instagram Lead Ads and Campaigns'),
   ('google',       'Google Ads (Search, Display, Shopping, Performance Max)'),
   ('instagram',    'Instagram organic and paid posts'),
@@ -336,12 +345,12 @@ INSERT INTO marketing_platforms (name, description) VALUES
   ('whatsapp_ads', 'WhatsApp click-to-chat ads via Facebook Ads Manager (legacy alias)')
 ON CONFLICT (name) DO NOTHING;
 
-CREATE TABLE IF NOT EXISTS campaign_statuses (
-  id          UUID PRIMARY KEY DEFAULT gen_uuidv7(),
+CREATE TABLE IF NOT EXISTS marketing.campaign_statuses (
+  id          UUID PRIMARY KEY DEFAULT public.gen_uuidv7(),
   name        TEXT NOT NULL UNIQUE,
   description TEXT
 );
-INSERT INTO campaign_statuses (name, description) VALUES
+INSERT INTO marketing.campaign_statuses (name, description) VALUES
   ('draft',     'Campaign created but not yet submitted for review or activation'),
   ('active',    'Campaign is live and currently running'),
   ('paused',    'Campaign temporarily paused; can be resumed'),
@@ -349,12 +358,12 @@ INSERT INTO campaign_statuses (name, description) VALUES
   ('archived',  'Campaign permanently closed and moved to archive')
 ON CONFLICT (name) DO NOTHING;
 
-CREATE TABLE IF NOT EXISTS org_types (
-  id          UUID PRIMARY KEY DEFAULT gen_uuidv7(),
+CREATE TABLE IF NOT EXISTS entity.org_types (
+  id          UUID PRIMARY KEY DEFAULT public.gen_uuidv7(),
   name        TEXT NOT NULL UNIQUE,
   description TEXT
 );
-INSERT INTO org_types (name, description) VALUES
+INSERT INTO entity.org_types (name, description) VALUES
   ('gym_location', 'Physical gym or fitness centre location'),
   ('boutique',     'Boutique or small retail outlet'),
   ('branch',       'Standard branch office of a business'),
@@ -366,12 +375,12 @@ INSERT INTO org_types (name, description) VALUES
   ('head_office',  'Corporate headquarters or registered office (alias)')
 ON CONFLICT (name) DO NOTHING;
 
-CREATE TABLE IF NOT EXISTS tenant_domains (
-  id          UUID PRIMARY KEY DEFAULT gen_uuidv7(),
+CREATE TABLE IF NOT EXISTS entity.tenant_domains (
+  id          UUID PRIMARY KEY DEFAULT public.gen_uuidv7(),
   name        TEXT NOT NULL UNIQUE,
   description TEXT
 );
-INSERT INTO tenant_domains (name, description) VALUES
+INSERT INTO entity.tenant_domains (name, description) VALUES
   ('fitness',     'Gyms, fitness centres, yoga studios, personal training'),
   ('retail',      'Fashion boutiques, apparel, accessories, lifestyle stores'),
   ('healthcare',  'Clinics, hospitals, diagnostic centres, healthcare providers'),
@@ -383,24 +392,24 @@ INSERT INTO tenant_domains (name, description) VALUES
   ('logistics',   'Warehousing, freight, courier, supply chain')
 ON CONFLICT (name) DO NOTHING;
 
-CREATE TABLE IF NOT EXISTS tenant_plan_types (
-  id          UUID PRIMARY KEY DEFAULT gen_uuidv7(),
+CREATE TABLE IF NOT EXISTS entity.tenant_plan_types (
+  id          UUID PRIMARY KEY DEFAULT public.gen_uuidv7(),
   name        TEXT NOT NULL UNIQUE,
   description TEXT
 );
-INSERT INTO tenant_plan_types (name, description) VALUES
-  ('free_trial', 'Up to 3 users, 1 org, 100 leads — 30-day trial'),
-  ('starter',    'Up to 10 users, 2 orgs, 1 000 leads/month'),
-  ('growth',     'Up to 50 users, 10 orgs, 10 000 leads/month, AI scoring'),
-  ('enterprise', 'Unlimited users and orgs, dedicated support, custom SLA')
+INSERT INTO entity.tenant_plan_types (name, description) VALUES
+  ('free_trial', 'Up to 3 iam.users, 1 org, 100 leads — 30-day trial'),
+  ('starter',    'Up to 10 iam.users, 2 orgs, 1 000 leads/month'),
+  ('growth',     'Up to 50 iam.users, 10 orgs, 10 000 leads/month, AI scoring'),
+  ('enterprise', 'Unlimited iam.users and orgs, dedicated support, custom SLA')
 ON CONFLICT (name) DO NOTHING;
 
 -- Monorepo addition: source channel for organic / non-campaign leads
-CREATE TABLE IF NOT EXISTS lead_sources (
-  id   UUID PRIMARY KEY DEFAULT gen_uuidv7(),
+CREATE TABLE IF NOT EXISTS crm.lead_sources (
+  id   UUID PRIMARY KEY DEFAULT public.gen_uuidv7(),
   name TEXT NOT NULL UNIQUE
 );
-INSERT INTO lead_sources (name) VALUES
+INSERT INTO crm.lead_sources (name) VALUES
   ('facebook'),('google'),('instagram'),('whatsapp'),('website_form'),
   ('referral'),('walk_in'),('cold_call'),('other')
 ON CONFLICT (name) DO NOTHING;
@@ -411,13 +420,13 @@ ON CONFLICT (name) DO NOTHING;
 
 -- ── Utility functions (needed before table triggers) ──────────────
 
-CREATE OR REPLACE FUNCTION set_updated_at()
+CREATE OR REPLACE FUNCTION public.set_updated_at()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN NEW.updated_at := CLOCK_TIMESTAMP(); RETURN NEW; END; $$;
 
 -- Converts a physical DELETE into a soft delete (UPDATE is_deleted=TRUE).
 -- crm_service bypasses this and performs a real delete (GDPR/purge).
-CREATE OR REPLACE FUNCTION soft_delete_row()
+CREATE OR REPLACE FUNCTION public.soft_delete_row()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 DECLARE v_user_id UUID;
 BEGIN
@@ -433,7 +442,7 @@ BEGIN
 END; $$;
 
 -- Auto-populates created_by from app.current_user_id on INSERT.
-CREATE OR REPLACE FUNCTION set_created_by()
+CREATE OR REPLACE FUNCTION public.set_created_by()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 DECLARE v_user_id UUID;
 BEGIN
@@ -447,7 +456,7 @@ BEGIN
 END; $$;
 
 -- Auto-populate org_id from session GUC when not provided explicitly.
-CREATE OR REPLACE FUNCTION set_org_id()
+CREATE OR REPLACE FUNCTION public.set_org_id()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 DECLARE v_org TEXT;
 BEGIN
@@ -462,11 +471,11 @@ BEGIN
 END; $$;
 
 -- ── TENANTS ───────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS tenants (
-  id           UUID    PRIMARY KEY DEFAULT gen_uuidv7(),
+CREATE TABLE IF NOT EXISTS entity.tenants (
+  id           UUID    PRIMARY KEY DEFAULT public.gen_uuidv7(),
   name         TEXT    NOT NULL UNIQUE,
-  domain_id    UUID    REFERENCES tenant_domains(id),
-  plan_type_id UUID    REFERENCES tenant_plan_types(id),
+  domain_id    UUID    REFERENCES entity.tenant_domains(id),
+  plan_type_id UUID    REFERENCES entity.tenant_plan_types(id),
   is_active    BOOLEAN NOT NULL DEFAULT TRUE,
   is_deleted   BOOLEAN NOT NULL DEFAULT FALSE,
   deleted_at   TIMESTAMPTZ,
@@ -477,31 +486,31 @@ CREATE TABLE IF NOT EXISTS tenants (
   CONSTRAINT chk_tenants_active_deleted CHECK (NOT (is_active AND is_deleted))
 );
 
-DROP TRIGGER IF EXISTS trg_tenants_updated_at   ON tenants;
+DROP TRIGGER IF EXISTS trg_tenants_updated_at   ON entity.tenants;
 CREATE TRIGGER trg_tenants_updated_at
-  BEFORE UPDATE ON tenants FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+  BEFORE UPDATE ON entity.tenants FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
-DROP TRIGGER IF EXISTS trg_tenants_soft_delete  ON tenants;
+DROP TRIGGER IF EXISTS trg_tenants_soft_delete  ON entity.tenants;
 CREATE TRIGGER trg_tenants_soft_delete
-  BEFORE DELETE ON tenants FOR EACH ROW EXECUTE FUNCTION soft_delete_row();
+  BEFORE DELETE ON entity.tenants FOR EACH ROW EXECUTE FUNCTION public.soft_delete_row();
 
 -- ── ORGANIZATIONS ─────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS organizations (
-  id            UUID    PRIMARY KEY DEFAULT gen_uuidv7(),
-  tenant_id     UUID    NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
+CREATE TABLE IF NOT EXISTS entity.organizations (
+  id            UUID    PRIMARY KEY DEFAULT public.gen_uuidv7(),
+  tenant_id     UUID    NOT NULL REFERENCES entity.tenants(id) ON DELETE RESTRICT,
   name               TEXT    NOT NULL,
   legal_entity_name  TEXT,
   brand_name         TEXT,
-  org_type_id        UUID    REFERENCES org_types(id),
+  org_type_id        UUID    REFERENCES entity.org_types(id),
   address_line1 TEXT,
   address_line2 TEXT,
   landmark      TEXT,
   pincode       TEXT,
   -- free-text city (monorepo); structured FK city below for enriched queries
   city          TEXT,
-  city_id       INTEGER  REFERENCES cities(id)    ON DELETE RESTRICT,
-  state_id      SMALLINT REFERENCES states(id)    ON DELETE RESTRICT,
-  country_id    SMALLINT REFERENCES countries(id) ON DELETE RESTRICT,
+  city_id       INTEGER  REFERENCES geo.cities(id)    ON DELETE RESTRICT,
+  state_id      SMALLINT REFERENCES geo.states(id)    ON DELETE RESTRICT,
+  country_id    SMALLINT REFERENCES geo.countries(id) ON DELETE RESTRICT,
   timezone      TEXT    NOT NULL DEFAULT 'Asia/Kolkata',
   is_active     BOOLEAN NOT NULL DEFAULT TRUE,
   is_deleted    BOOLEAN NOT NULL DEFAULT FALSE,
@@ -514,19 +523,19 @@ CREATE TABLE IF NOT EXISTS organizations (
   CONSTRAINT chk_organizations_active_deleted CHECK (NOT (is_active AND is_deleted))
 );
 
-DROP TRIGGER IF EXISTS trg_organizations_updated_at  ON organizations;
+DROP TRIGGER IF EXISTS trg_organizations_updated_at  ON entity.organizations;
 CREATE TRIGGER trg_organizations_updated_at
-  BEFORE UPDATE ON organizations FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+  BEFORE UPDATE ON entity.organizations FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
-DROP TRIGGER IF EXISTS trg_organizations_soft_delete ON organizations;
+DROP TRIGGER IF EXISTS trg_organizations_soft_delete ON entity.organizations;
 CREATE TRIGGER trg_organizations_soft_delete
-  BEFORE DELETE ON organizations FOR EACH ROW EXECUTE FUNCTION soft_delete_row();
+  BEFORE DELETE ON entity.organizations FOR EACH ROW EXECUTE FUNCTION public.soft_delete_row();
 
 -- ── USERS ─────────────────────────────────────────────────────────
 -- full_name is GENERATED ALWAYS AS STORED — never insert it directly.
-CREATE TABLE IF NOT EXISTS users (
-  id                    UUID    PRIMARY KEY DEFAULT gen_uuidv7(),
-  org_id                UUID    NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
+CREATE TABLE IF NOT EXISTS iam.users (
+  id                    UUID    PRIMARY KEY DEFAULT public.gen_uuidv7(),
+  org_id                UUID    NOT NULL REFERENCES entity.organizations(id) ON DELETE RESTRICT,
   first_name            TEXT    NOT NULL,
   middle_name           TEXT,
   last_name             TEXT    NOT NULL DEFAULT '',
@@ -538,9 +547,9 @@ CREATE TABLE IF NOT EXISTS users (
   email                 TEXT    NOT NULL UNIQUE,
   mobile                TEXT,
   password_hash         TEXT    NOT NULL,
-  role_id               UUID    NOT NULL REFERENCES user_roles(id) ON DELETE RESTRICT,
+  role_id               UUID    NOT NULL REFERENCES iam.user_roles(id) ON DELETE RESTRICT,
   -- self-referential adjacency list; NULL = top of hierarchy
-  manager_id            UUID    REFERENCES users(id) ON DELETE SET NULL,
+  manager_id            UUID    REFERENCES iam.users(id) ON DELETE SET NULL,
   is_active             BOOLEAN NOT NULL DEFAULT TRUE,
   is_deleted            BOOLEAN NOT NULL DEFAULT FALSE,
   deleted_at            TIMESTAMPTZ,
@@ -555,39 +564,62 @@ CREATE TABLE IF NOT EXISTS users (
   CONSTRAINT chk_users_active_deleted    CHECK (NOT (is_active AND is_deleted))
 );
 
-DROP TRIGGER IF EXISTS trg_users_updated_at       ON users;
+DROP TRIGGER IF EXISTS trg_users_updated_at       ON iam.users;
 CREATE TRIGGER trg_users_updated_at
-  BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+  BEFORE UPDATE ON iam.users FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
-DROP TRIGGER IF EXISTS trg_users_soft_delete      ON users;
+DROP TRIGGER IF EXISTS trg_users_soft_delete      ON iam.users;
 CREATE TRIGGER trg_users_soft_delete
-  BEFORE DELETE ON users FOR EACH ROW EXECUTE FUNCTION soft_delete_row();
+  BEFORE DELETE ON iam.users FOR EACH ROW EXECUTE FUNCTION public.soft_delete_row();
 
-DROP TRIGGER IF EXISTS trg_00_users_set_org_id    ON users;
+DROP TRIGGER IF EXISTS trg_00_users_set_org_id    ON iam.users;
 CREATE TRIGGER trg_00_users_set_org_id
-  BEFORE INSERT ON users FOR EACH ROW EXECUTE FUNCTION set_org_id();
+  BEFORE INSERT ON iam.users FOR EACH ROW EXECUTE FUNCTION public.set_org_id();
 
-DROP TRIGGER IF EXISTS trg_01_users_set_created_by ON users;
+DROP TRIGGER IF EXISTS trg_01_users_set_created_by ON iam.users;
 CREATE TRIGGER trg_01_users_set_created_by
-  BEFORE INSERT ON users FOR EACH ROW EXECUTE FUNCTION set_created_by();
+  BEFORE INSERT ON iam.users FOR EACH ROW EXECUTE FUNCTION public.set_created_by();
 
 -- ── BRANCHES (monorepo addition: physical branch within an org) ───
-CREATE TABLE IF NOT EXISTS branches (
-  id         UUID    PRIMARY KEY DEFAULT gen_uuidv7(),
-  org_id     UUID    NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
+CREATE TABLE IF NOT EXISTS entity.branches (
+  id         UUID    PRIMARY KEY DEFAULT public.gen_uuidv7(),
+  org_id     UUID    NOT NULL REFERENCES entity.organizations(id) ON DELETE RESTRICT,
   name       TEXT    NOT NULL,
   is_active  BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP(),
   UNIQUE (org_id, name)
 );
 
+-- RLS: app_user sees only entity.branches of orgs they are mapped to.
+ALTER TABLE entity.branches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE entity.branches FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS org_isolation_policy    ON entity.branches;
+DROP POLICY IF EXISTS tenant_isolation_policy ON entity.branches;
+
+CREATE POLICY org_isolation_policy ON entity.branches AS PERMISSIVE FOR ALL TO app_user
+  USING (
+    org_id = ANY(iam.fn_user_active_orgs(
+      NULLIF(current_setting('app.current_user_id', true), '')::uuid
+    ))
+  );
+
+CREATE POLICY tenant_isolation_policy ON entity.branches AS PERMISSIVE FOR ALL TO tenant_admin
+  USING (
+    org_id IN (
+      SELECT id FROM entity.organizations
+      WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+        AND NOT is_deleted
+    )
+  );
+
 -- ── AD_CAMPAIGNS ──────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS ad_campaigns (
-  id          UUID    PRIMARY KEY DEFAULT gen_uuidv7(),
-  org_id      UUID    NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
+CREATE TABLE IF NOT EXISTS marketing.ad_campaigns (
+  id          UUID    PRIMARY KEY DEFAULT public.gen_uuidv7(),
+  org_id      UUID    NOT NULL REFERENCES entity.organizations(id) ON DELETE RESTRICT,
   name        TEXT    NOT NULL,
-  platform_id UUID    NOT NULL REFERENCES marketing_platforms(id) ON DELETE RESTRICT,
-  status_id   UUID    NOT NULL REFERENCES campaign_statuses(id)   ON DELETE RESTRICT,
+  platform_id UUID    NOT NULL REFERENCES marketing.marketing_platforms(id) ON DELETE RESTRICT,
+  status_id   UUID    NOT NULL REFERENCES marketing.campaign_statuses(id)   ON DELETE RESTRICT,
   budget      NUMERIC(12,2),
   started_at  TIMESTAMPTZ,
   ended_at    TIMESTAMPTZ,
@@ -601,30 +633,30 @@ CREATE TABLE IF NOT EXISTS ad_campaigns (
     CHECK (ended_at IS NULL OR started_at IS NULL OR started_at < ended_at)
 );
 
-DROP TRIGGER IF EXISTS trg_ad_campaigns_updated_at    ON ad_campaigns;
+DROP TRIGGER IF EXISTS trg_ad_campaigns_updated_at    ON marketing.ad_campaigns;
 CREATE TRIGGER trg_ad_campaigns_updated_at
-  BEFORE UPDATE ON ad_campaigns FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+  BEFORE UPDATE ON marketing.ad_campaigns FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
-DROP TRIGGER IF EXISTS trg_ad_campaigns_soft_delete   ON ad_campaigns;
+DROP TRIGGER IF EXISTS trg_ad_campaigns_soft_delete   ON marketing.ad_campaigns;
 CREATE TRIGGER trg_ad_campaigns_soft_delete
-  BEFORE DELETE ON ad_campaigns FOR EACH ROW EXECUTE FUNCTION soft_delete_row();
+  BEFORE DELETE ON marketing.ad_campaigns FOR EACH ROW EXECUTE FUNCTION public.soft_delete_row();
 
-DROP TRIGGER IF EXISTS trg_00_ad_campaigns_set_org_id ON ad_campaigns;
+DROP TRIGGER IF EXISTS trg_00_ad_campaigns_set_org_id ON marketing.ad_campaigns;
 CREATE TRIGGER trg_00_ad_campaigns_set_org_id
-  BEFORE INSERT ON ad_campaigns FOR EACH ROW EXECUTE FUNCTION set_org_id();
+  BEFORE INSERT ON marketing.ad_campaigns FOR EACH ROW EXECUTE FUNCTION public.set_org_id();
 
-DROP TRIGGER IF EXISTS trg_01_ad_campaigns_set_created_by ON ad_campaigns;
+DROP TRIGGER IF EXISTS trg_01_ad_campaigns_set_created_by ON marketing.ad_campaigns;
 CREATE TRIGGER trg_01_ad_campaigns_set_created_by
-  BEFORE INSERT ON ad_campaigns FOR EACH ROW EXECUTE FUNCTION set_created_by();
+  BEFORE INSERT ON marketing.ad_campaigns FOR EACH ROW EXECUTE FUNCTION public.set_created_by();
 
 -- ── MARKETING_LEADS ───────────────────────────────────────────────
 -- full_name is GENERATED ALWAYS AS STORED.
 -- city TEXT = free-text (monorepo); city_id/state_id/country_id = structured FK (EXISTING).
 -- duplicate_lead_id: walk-in dedup pointer to the oldest digital lead with same phone/email.
 -- embedding column stub: uncomment after pgvector confirmed.
-CREATE TABLE IF NOT EXISTS marketing_leads (
-  id               UUID    PRIMARY KEY DEFAULT gen_uuidv7(),
-  org_id           UUID    NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
+CREATE TABLE IF NOT EXISTS crm.marketing_leads (
+  id               UUID    PRIMARY KEY DEFAULT public.gen_uuidv7(),
+  org_id           UUID    NOT NULL REFERENCES entity.organizations(id) ON DELETE RESTRICT,
   first_name       TEXT    NOT NULL,
   middle_name      TEXT,
   last_name        TEXT    NOT NULL DEFAULT '',
@@ -642,21 +674,21 @@ CREATE TABLE IF NOT EXISTS marketing_leads (
   pincode          TEXT,
   -- free-text city (backwards-compatible); structured FKs below
   city             TEXT,
-  city_id          INTEGER  REFERENCES cities(id)    ON DELETE RESTRICT,
-  state_id         SMALLINT REFERENCES states(id)    ON DELETE RESTRICT,
-  country_id       SMALLINT REFERENCES countries(id) ON DELETE RESTRICT,
+  city_id          INTEGER  REFERENCES geo.cities(id)    ON DELETE RESTRICT,
+  state_id         SMALLINT REFERENCES geo.states(id)    ON DELETE RESTRICT,
+  country_id       SMALLINT REFERENCES geo.countries(id) ON DELETE RESTRICT,
   -- CRM state
-  stage_id         UUID    REFERENCES lead_stage(id)         ON DELETE RESTRICT,
-  outcome_id       UUID    REFERENCES lead_stage_outcome(id)  ON DELETE RESTRICT,
+  stage_id         UUID    REFERENCES crm.lead_stage(id)         ON DELETE RESTRICT,
+  outcome_id       UUID    REFERENCES crm.lead_stage_outcome(id)  ON DELETE RESTRICT,
   outcome_comment  TEXT,
   -- source tracking
-  campaign_id      UUID    REFERENCES ad_campaigns(id) ON DELETE SET NULL,
-  source_id        UUID    REFERENCES lead_sources(id),
-  branch_id        UUID    REFERENCES branches(id),
+  campaign_id      UUID    REFERENCES marketing.ad_campaigns(id) ON DELETE SET NULL,
+  source_id        UUID    REFERENCES crm.lead_sources(id),
+  branch_id        UUID    REFERENCES entity.branches(id),
   -- assignment
-  assigned_user_id UUID    REFERENCES users(id) ON DELETE SET NULL,
+  assigned_user_id UUID    REFERENCES iam.users(id) ON DELETE SET NULL,
   -- walk-in dedup
-  duplicate_lead_id UUID   REFERENCES marketing_leads(id) ON DELETE SET NULL,
+  duplicate_lead_id UUID   REFERENCES crm.marketing_leads(id) ON DELETE SET NULL,
   -- raw/enrichment data
   raw_webhook_data JSONB   NOT NULL DEFAULT '{}',
   metadata         JSONB   NOT NULL DEFAULT '{}',
@@ -670,33 +702,33 @@ CREATE TABLE IF NOT EXISTS marketing_leads (
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP()
 );
 
-COMMENT ON COLUMN marketing_leads.duplicate_lead_id IS
+COMMENT ON COLUMN crm.marketing_leads.duplicate_lead_id IS
   'Set on walk-in leads when an existing campaign-sourced lead with the same phone/email exists. Points to the oldest matching digital lead in the same org.';
 
-DROP TRIGGER IF EXISTS trg_marketing_leads_updated_at     ON marketing_leads;
+DROP TRIGGER IF EXISTS trg_marketing_leads_updated_at     ON crm.marketing_leads;
 CREATE TRIGGER trg_marketing_leads_updated_at
-  BEFORE UPDATE ON marketing_leads FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+  BEFORE UPDATE ON crm.marketing_leads FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
-DROP TRIGGER IF EXISTS trg_marketing_leads_soft_delete    ON marketing_leads;
+DROP TRIGGER IF EXISTS trg_marketing_leads_soft_delete    ON crm.marketing_leads;
 CREATE TRIGGER trg_marketing_leads_soft_delete
-  BEFORE DELETE ON marketing_leads FOR EACH ROW EXECUTE FUNCTION soft_delete_row();
+  BEFORE DELETE ON crm.marketing_leads FOR EACH ROW EXECUTE FUNCTION public.soft_delete_row();
 
-DROP TRIGGER IF EXISTS trg_00_marketing_leads_set_org_id  ON marketing_leads;
+DROP TRIGGER IF EXISTS trg_00_marketing_leads_set_org_id  ON crm.marketing_leads;
 CREATE TRIGGER trg_00_marketing_leads_set_org_id
-  BEFORE INSERT ON marketing_leads FOR EACH ROW EXECUTE FUNCTION set_org_id();
+  BEFORE INSERT ON crm.marketing_leads FOR EACH ROW EXECUTE FUNCTION public.set_org_id();
 
-DROP TRIGGER IF EXISTS trg_01_marketing_leads_set_created_by ON marketing_leads;
+DROP TRIGGER IF EXISTS trg_01_marketing_leads_set_created_by ON crm.marketing_leads;
 CREATE TRIGGER trg_01_marketing_leads_set_created_by
-  BEFORE INSERT ON marketing_leads FOR EACH ROW EXECUTE FUNCTION set_created_by();
+  BEFORE INSERT ON crm.marketing_leads FOR EACH ROW EXECUTE FUNCTION public.set_created_by();
 
 -- ── LEAD_INTERACTIONS ─────────────────────────────────────────────
 -- Append-only log — no updated_at, no update trigger.
-CREATE TABLE IF NOT EXISTS lead_interactions (
-  id                  UUID    PRIMARY KEY DEFAULT gen_uuidv7(),
-  org_id              UUID    NOT NULL REFERENCES organizations(id)   ON DELETE RESTRICT,
-  lead_id             UUID    NOT NULL REFERENCES marketing_leads(id) ON DELETE CASCADE,
-  user_id             UUID    NOT NULL REFERENCES users(id)           ON DELETE RESTRICT,
-  interaction_type_id UUID    REFERENCES interaction_types(id)        ON DELETE RESTRICT,
+CREATE TABLE IF NOT EXISTS crm.lead_interactions (
+  id                  UUID    PRIMARY KEY DEFAULT public.gen_uuidv7(),
+  org_id              UUID    NOT NULL REFERENCES entity.organizations(id)   ON DELETE RESTRICT,
+  lead_id             UUID    NOT NULL REFERENCES crm.marketing_leads(id) ON DELETE CASCADE,
+  user_id             UUID    NOT NULL REFERENCES iam.users(id)           ON DELETE RESTRICT,
+  interaction_type_id UUID    REFERENCES crm.interaction_types(id)        ON DELETE RESTRICT,
   notes               TEXT,
   duration_seconds    INT,
   occurred_at         TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP(),
@@ -707,25 +739,25 @@ CREATE TABLE IF NOT EXISTS lead_interactions (
   created_at          TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP()
 );
 
-DROP TRIGGER IF EXISTS trg_lead_interactions_soft_delete        ON lead_interactions;
+DROP TRIGGER IF EXISTS trg_lead_interactions_soft_delete        ON crm.lead_interactions;
 CREATE TRIGGER trg_lead_interactions_soft_delete
-  BEFORE DELETE ON lead_interactions FOR EACH ROW EXECUTE FUNCTION soft_delete_row();
+  BEFORE DELETE ON crm.lead_interactions FOR EACH ROW EXECUTE FUNCTION public.soft_delete_row();
 
-DROP TRIGGER IF EXISTS trg_00_lead_interactions_set_org_id      ON lead_interactions;
+DROP TRIGGER IF EXISTS trg_00_lead_interactions_set_org_id      ON crm.lead_interactions;
 CREATE TRIGGER trg_00_lead_interactions_set_org_id
-  BEFORE INSERT ON lead_interactions FOR EACH ROW EXECUTE FUNCTION set_org_id();
+  BEFORE INSERT ON crm.lead_interactions FOR EACH ROW EXECUTE FUNCTION public.set_org_id();
 
-DROP TRIGGER IF EXISTS trg_01_lead_interactions_set_created_by  ON lead_interactions;
+DROP TRIGGER IF EXISTS trg_01_lead_interactions_set_created_by  ON crm.lead_interactions;
 CREATE TRIGGER trg_01_lead_interactions_set_created_by
-  BEFORE INSERT ON lead_interactions FOR EACH ROW EXECUTE FUNCTION set_created_by();
+  BEFORE INSERT ON crm.lead_interactions FOR EACH ROW EXECUTE FUNCTION public.set_created_by();
 
 -- ── LEAD_FOLLOW_UPS ───────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS lead_follow_ups (
-  id               UUID    PRIMARY KEY DEFAULT gen_uuidv7(),
-  org_id           UUID    NOT NULL REFERENCES organizations(id)   ON DELETE RESTRICT,
-  lead_id          UUID    NOT NULL REFERENCES marketing_leads(id) ON DELETE CASCADE,
-  assigned_user_id UUID    NOT NULL REFERENCES users(id)           ON DELETE RESTRICT,
-  status_id        UUID    NOT NULL REFERENCES follow_up_statuses(id) ON DELETE RESTRICT,
+CREATE TABLE IF NOT EXISTS crm.lead_follow_ups (
+  id               UUID    PRIMARY KEY DEFAULT public.gen_uuidv7(),
+  org_id           UUID    NOT NULL REFERENCES entity.organizations(id)   ON DELETE RESTRICT,
+  lead_id          UUID    NOT NULL REFERENCES crm.marketing_leads(id) ON DELETE CASCADE,
+  assigned_user_id UUID    NOT NULL REFERENCES iam.users(id)           ON DELETE RESTRICT,
+  status_id        UUID    NOT NULL REFERENCES crm.follow_up_statuses(id) ON DELETE RESTRICT,
   scheduled_at     TIMESTAMPTZ NOT NULL,
   completed_at     TIMESTAMPTZ,
   notes            TEXT,
@@ -737,31 +769,31 @@ CREATE TABLE IF NOT EXISTS lead_follow_ups (
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP()
 );
 
-DROP TRIGGER IF EXISTS trg_lead_follow_ups_updated_at        ON lead_follow_ups;
+DROP TRIGGER IF EXISTS trg_lead_follow_ups_updated_at        ON crm.lead_follow_ups;
 CREATE TRIGGER trg_lead_follow_ups_updated_at
-  BEFORE UPDATE ON lead_follow_ups FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+  BEFORE UPDATE ON crm.lead_follow_ups FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
-DROP TRIGGER IF EXISTS trg_lead_follow_ups_soft_delete       ON lead_follow_ups;
+DROP TRIGGER IF EXISTS trg_lead_follow_ups_soft_delete       ON crm.lead_follow_ups;
 CREATE TRIGGER trg_lead_follow_ups_soft_delete
-  BEFORE DELETE ON lead_follow_ups FOR EACH ROW EXECUTE FUNCTION soft_delete_row();
+  BEFORE DELETE ON crm.lead_follow_ups FOR EACH ROW EXECUTE FUNCTION public.soft_delete_row();
 
-DROP TRIGGER IF EXISTS trg_00_lead_follow_ups_set_org_id     ON lead_follow_ups;
+DROP TRIGGER IF EXISTS trg_00_lead_follow_ups_set_org_id     ON crm.lead_follow_ups;
 CREATE TRIGGER trg_00_lead_follow_ups_set_org_id
-  BEFORE INSERT ON lead_follow_ups FOR EACH ROW EXECUTE FUNCTION set_org_id();
+  BEFORE INSERT ON crm.lead_follow_ups FOR EACH ROW EXECUTE FUNCTION public.set_org_id();
 
-DROP TRIGGER IF EXISTS trg_01_lead_follow_ups_set_created_by ON lead_follow_ups;
+DROP TRIGGER IF EXISTS trg_01_lead_follow_ups_set_created_by ON crm.lead_follow_ups;
 CREATE TRIGGER trg_01_lead_follow_ups_set_created_by
-  BEFORE INSERT ON lead_follow_ups FOR EACH ROW EXECUTE FUNCTION set_created_by();
+  BEFORE INSERT ON crm.lead_follow_ups FOR EACH ROW EXECUTE FUNCTION public.set_created_by();
 
 -- ── LEAD_ASSIGNMENT_LOG ───────────────────────────────────────────
--- Populated automatically by trigger on marketing_leads.
-CREATE TABLE IF NOT EXISTS lead_assignment_log (
-  id                   UUID PRIMARY KEY DEFAULT gen_uuidv7(),
-  org_id               UUID NOT NULL REFERENCES organizations(id)   ON DELETE RESTRICT,
-  lead_id              UUID NOT NULL REFERENCES marketing_leads(id) ON DELETE CASCADE,
-  assigned_by_id       UUID REFERENCES users(id) ON DELETE SET NULL,
-  assigned_to_id       UUID REFERENCES users(id) ON DELETE SET NULL,
-  previous_assignee_id UUID REFERENCES users(id) ON DELETE SET NULL,
+-- Populated automatically by trigger on crm.marketing_leads.
+CREATE TABLE IF NOT EXISTS crm.lead_assignment_log (
+  id                   UUID PRIMARY KEY DEFAULT public.gen_uuidv7(),
+  org_id               UUID NOT NULL REFERENCES entity.organizations(id)   ON DELETE RESTRICT,
+  lead_id              UUID NOT NULL REFERENCES crm.marketing_leads(id) ON DELETE CASCADE,
+  assigned_by_id       UUID REFERENCES iam.users(id) ON DELETE SET NULL,
+  assigned_to_id       UUID REFERENCES iam.users(id) ON DELETE SET NULL,
+  previous_assignee_id UUID REFERENCES iam.users(id) ON DELETE SET NULL,
   action               TEXT NOT NULL DEFAULT 'reassigned'
                        CONSTRAINT chk_assignment_action CHECK (
                          action IN ('initial','reassigned','unassigned','self_assigned','bulk_assigned')
@@ -771,63 +803,63 @@ CREATE TABLE IF NOT EXISTS lead_assignment_log (
 );
 
 -- ── ACTIVITIES ────────────────────────────────────────────────────
--- Fire-and-forget log written by activities-service.
-CREATE TABLE IF NOT EXISTS activities (
-  id           UUID PRIMARY KEY DEFAULT gen_uuidv7(),
+-- Fire-and-forget log written by audit.activities-service.
+CREATE TABLE IF NOT EXISTS audit.activities (
+  id           UUID PRIMARY KEY DEFAULT public.gen_uuidv7(),
   action_type  TEXT NOT NULL,
-  performed_by UUID REFERENCES users(id),
+  performed_by UUID REFERENCES iam.users(id),
   target_id    UUID,
   target_type  TEXT,
-  org_id       UUID REFERENCES organizations(id),
+  org_id       UUID REFERENCES entity.organizations(id),
   meta         JSONB,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP()
 );
 
 -- ── LEAD_STATUS_LOG ───────────────────────────────────────────────
 -- Immutable stage-transition log. Written by trigger only.
-CREATE TABLE IF NOT EXISTS lead_status_log (
-  id               UUID PRIMARY KEY DEFAULT gen_uuidv7(),
-  org_id           UUID NOT NULL REFERENCES organizations(id)   ON DELETE RESTRICT,
-  lead_id          UUID NOT NULL REFERENCES marketing_leads(id) ON DELETE CASCADE,
-  changed_by_id    UUID REFERENCES users(id)            ON DELETE SET NULL,
-  old_stage_id     UUID REFERENCES lead_stage(id)       ON DELETE RESTRICT,
-  new_stage_id     UUID NOT NULL REFERENCES lead_stage(id) ON DELETE RESTRICT,
-  old_outcome_id   UUID REFERENCES lead_stage_outcome(id) ON DELETE RESTRICT,
-  new_outcome_id   UUID REFERENCES lead_stage_outcome(id) ON DELETE RESTRICT,
-  assigned_user_id UUID REFERENCES users(id)            ON DELETE SET NULL,
+CREATE TABLE IF NOT EXISTS crm.lead_status_log (
+  id               UUID PRIMARY KEY DEFAULT public.gen_uuidv7(),
+  org_id           UUID NOT NULL REFERENCES entity.organizations(id)   ON DELETE RESTRICT,
+  lead_id          UUID NOT NULL REFERENCES crm.marketing_leads(id) ON DELETE CASCADE,
+  changed_by_id    UUID REFERENCES iam.users(id)            ON DELETE SET NULL,
+  old_stage_id     UUID REFERENCES crm.lead_stage(id)       ON DELETE RESTRICT,
+  new_stage_id     UUID NOT NULL REFERENCES crm.lead_stage(id) ON DELETE RESTRICT,
+  old_outcome_id   UUID REFERENCES crm.lead_stage_outcome(id) ON DELETE RESTRICT,
+  new_outcome_id   UUID REFERENCES crm.lead_stage_outcome(id) ON DELETE RESTRICT,
+  assigned_user_id UUID REFERENCES iam.users(id)            ON DELETE SET NULL,
   transition_note  TEXT,
   changed_at       TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP()
 );
 
 CREATE INDEX IF NOT EXISTS idx_lead_status_log_lead_changed
-  ON lead_status_log (org_id, lead_id, changed_at DESC);
+  ON crm.lead_status_log (org_id, lead_id, changed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_lead_status_log_org_changed
-  ON lead_status_log (org_id, changed_at DESC);
+  ON crm.lead_status_log (org_id, changed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_lead_status_log_changed_by
-  ON lead_status_log (org_id, changed_by_id, changed_at DESC);
+  ON crm.lead_status_log (org_id, changed_by_id, changed_at DESC);
 
 -- ── MARKETING_LEADS_HISTORY ───────────────────────────────────────
--- Dedicated audit table for marketing_leads field changes.
+-- Dedicated audit table for crm.marketing_leads field changes.
 -- UPDATE: diff-style {"field": {"old": v, "new": v}}
 -- DELETE: full to_jsonb(OLD) snapshot
-CREATE TABLE IF NOT EXISTS marketing_leads_history (
-  id                 UUID    PRIMARY KEY DEFAULT gen_uuidv7(),
-  lead_id            UUID    NOT NULL REFERENCES marketing_leads(id) ON DELETE RESTRICT,
-  changed_by_user_id UUID    REFERENCES users(id) ON DELETE SET NULL,
+CREATE TABLE IF NOT EXISTS audit.marketing_leads_history (
+  id                 UUID    PRIMARY KEY DEFAULT public.gen_uuidv7(),
+  lead_id            UUID    NOT NULL REFERENCES crm.marketing_leads(id) ON DELETE RESTRICT,
+  changed_by_user_id UUID    REFERENCES iam.users(id) ON DELETE SET NULL,
   operation          CHAR(1) NOT NULL CHECK (operation IN ('I','U','D')),
   changed_fields     JSONB,
   changed_at         TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP()
 );
 
 CREATE INDEX IF NOT EXISTS idx_marketing_leads_history_lead_changed
-  ON marketing_leads_history (lead_id, changed_at DESC);
+  ON audit.marketing_leads_history (lead_id, changed_at DESC);
 
 -- ── AUDIT_LOG ─────────────────────────────────────────────────────
--- Generic audit for all operational tables except marketing_leads
+-- Generic audit for all operational tables except crm.marketing_leads
 -- (which has its own history table above).
 -- Columns cover both the monorepo convention and EXISTING_WORKING_CODE convention.
-CREATE TABLE IF NOT EXISTS audit_log (
-  id             UUID        PRIMARY KEY DEFAULT gen_uuidv7(),
+CREATE TABLE IF NOT EXISTS audit.audit_log (
+  id             UUID        PRIMARY KEY DEFAULT public.gen_uuidv7(),
   table_name     TEXT        NOT NULL,
   operation      CHAR(1)     NOT NULL CHECK (operation IN ('U', 'D')),
   -- EXISTING_WORKING_CODE naming
@@ -836,7 +868,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
   changed_fields JSONB,
   -- monorepo naming (aliases of above; populated together for compatibility)
   row_id         UUID,
-  actor_id       UUID        REFERENCES users(id),
+  actor_id       UUID        REFERENCES iam.users(id),
   old_data       JSONB,
   new_data       JSONB,
   -- common
@@ -845,20 +877,20 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_log_table_record
-  ON audit_log (table_name, record_id, changed_at DESC);
+  ON audit.audit_log (table_name, record_id, changed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_log_org_table
-  ON audit_log (org_id, table_name, changed_at DESC)
+  ON audit.audit_log (org_id, table_name, changed_at DESC)
   WHERE org_id IS NOT NULL;
 
 -- ===================================================================
 -- BUSINESS RULE TRIGGER FUNCTIONS
 -- ===================================================================
 
--- Enforces outcome_id ↔ stage_id consistency on marketing_leads.
+-- Enforces outcome_id ↔ stage_id consistency on crm.marketing_leads.
 -- On stage change: auto-nulls outcome when new stage has no outcomes or
 --   supplied outcome doesn't match the new stage.
 -- Validates requires_comment when outcome.requires_comment = TRUE.
-CREATE OR REPLACE FUNCTION check_lead_stage_outcome()
+CREATE OR REPLACE FUNCTION crm.check_lead_stage_outcome()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 DECLARE
   v_outcome_stage_id  UUID;
@@ -867,14 +899,14 @@ DECLARE
 BEGIN
   IF TG_OP = 'UPDATE' AND NEW.stage_id IS DISTINCT FROM OLD.stage_id THEN
     SELECT COUNT(*) INTO v_outcome_count
-    FROM lead_stage_outcome WHERE stage_id = NEW.stage_id;
+    FROM crm.lead_stage_outcome WHERE stage_id = NEW.stage_id;
 
     IF v_outcome_count = 0 THEN
       NEW.outcome_id      := NULL;
       NEW.outcome_comment := NULL;
     ELSIF NEW.outcome_id IS NOT NULL THEN
       IF NOT EXISTS (
-        SELECT 1 FROM lead_stage_outcome
+        SELECT 1 FROM crm.lead_stage_outcome
         WHERE id = NEW.outcome_id AND stage_id = NEW.stage_id
       ) THEN
         NEW.outcome_id      := NULL;
@@ -883,7 +915,7 @@ BEGIN
     END IF;
   ELSIF NEW.outcome_id IS NOT NULL THEN
     SELECT stage_id INTO v_outcome_stage_id
-    FROM lead_stage_outcome WHERE id = NEW.outcome_id;
+    FROM crm.lead_stage_outcome WHERE id = NEW.outcome_id;
 
     IF v_outcome_stage_id IS DISTINCT FROM NEW.stage_id THEN
       RAISE EXCEPTION
@@ -894,7 +926,7 @@ BEGIN
 
   IF NEW.outcome_id IS NOT NULL THEN
     SELECT requires_comment INTO v_requires_comment
-    FROM lead_stage_outcome WHERE id = NEW.outcome_id;
+    FROM crm.lead_stage_outcome WHERE id = NEW.outcome_id;
 
     IF v_requires_comment AND (NEW.outcome_comment IS NULL OR NEW.outcome_comment = '') THEN
       RAISE EXCEPTION
@@ -907,17 +939,17 @@ BEGIN
   RETURN NEW;
 END; $$;
 
-DROP TRIGGER IF EXISTS trg_lead_stage_outcome_check ON marketing_leads;
+DROP TRIGGER IF EXISTS trg_lead_stage_outcome_check ON crm.marketing_leads;
 CREATE TRIGGER trg_lead_stage_outcome_check
-  BEFORE INSERT OR UPDATE OF stage_id, outcome_id, outcome_comment ON marketing_leads
-  FOR EACH ROW EXECUTE FUNCTION check_lead_stage_outcome();
+  BEFORE INSERT OR UPDATE OF stage_id, outcome_id, outcome_comment ON crm.marketing_leads
+  FOR EACH ROW EXECUTE FUNCTION crm.check_lead_stage_outcome();
 
 -- Enforces completed_at ↔ status='completed' invariant on follow-ups.
-CREATE OR REPLACE FUNCTION check_follow_up_completion()
+CREATE OR REPLACE FUNCTION crm.check_follow_up_completion()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 DECLARE v_status TEXT;
 BEGIN
-  SELECT name INTO v_status FROM follow_up_statuses WHERE id = NEW.status_id;
+  SELECT name INTO v_status FROM crm.follow_up_statuses WHERE id = NEW.status_id;
   IF v_status = 'completed' AND NEW.completed_at IS NULL THEN
     RAISE EXCEPTION 'completed_at must be set when follow_up status is ''completed''.';
   END IF;
@@ -927,24 +959,24 @@ BEGIN
   RETURN NEW;
 END; $$;
 
-DROP TRIGGER IF EXISTS trg_follow_up_completion_check ON lead_follow_ups;
+DROP TRIGGER IF EXISTS trg_follow_up_completion_check ON crm.lead_follow_ups;
 CREATE TRIGGER trg_follow_up_completion_check
-  BEFORE INSERT OR UPDATE OF status_id, completed_at ON lead_follow_ups
-  FOR EACH ROW EXECUTE FUNCTION check_follow_up_completion();
+  BEFORE INSERT OR UPDATE OF status_id, completed_at ON crm.lead_follow_ups
+  FOR EACH ROW EXECUTE FUNCTION crm.check_follow_up_completion();
 
 -- Validates campaign_id and assigned_user_id belong to the same org as the lead.
-CREATE OR REPLACE FUNCTION check_lead_fk_org_scope()
+CREATE OR REPLACE FUNCTION crm.check_lead_fk_org_scope()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
   IF NEW.campaign_id IS NOT NULL THEN
-    PERFORM 1 FROM ad_campaigns
+    PERFORM 1 FROM marketing.ad_campaigns
     WHERE id = NEW.campaign_id AND org_id = NEW.org_id AND NOT is_deleted;
     IF NOT FOUND THEN
       RAISE EXCEPTION 'campaign_id % does not belong to org % or has been deleted.', NEW.campaign_id, NEW.org_id;
     END IF;
   END IF;
   IF NEW.assigned_user_id IS NOT NULL THEN
-    PERFORM 1 FROM users
+    PERFORM 1 FROM iam.users
     WHERE id = NEW.assigned_user_id AND org_id = NEW.org_id AND NOT is_deleted;
     IF NOT FOUND THEN
       RAISE EXCEPTION 'assigned_user_id % does not belong to org % or has been deleted.', NEW.assigned_user_id, NEW.org_id;
@@ -953,21 +985,21 @@ BEGIN
   RETURN NEW;
 END; $$;
 
-DROP TRIGGER IF EXISTS trg_marketing_leads_fk_scope ON marketing_leads;
+DROP TRIGGER IF EXISTS trg_marketing_leads_fk_scope ON crm.marketing_leads;
 CREATE TRIGGER trg_marketing_leads_fk_scope
-  BEFORE INSERT OR UPDATE OF org_id, campaign_id, assigned_user_id ON marketing_leads
-  FOR EACH ROW EXECUTE FUNCTION check_lead_fk_org_scope();
+  BEFORE INSERT OR UPDATE OF org_id, campaign_id, assigned_user_id ON crm.marketing_leads
+  FOR EACH ROW EXECUTE FUNCTION crm.check_lead_fk_org_scope();
 
 -- Validates lead and user in an interaction share the same org.
-CREATE OR REPLACE FUNCTION check_interaction_fk_org_scope()
+CREATE OR REPLACE FUNCTION crm.check_interaction_fk_org_scope()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
-  PERFORM 1 FROM marketing_leads
+  PERFORM 1 FROM crm.marketing_leads
   WHERE id = NEW.lead_id AND org_id = NEW.org_id AND NOT is_deleted;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'lead_id % does not belong to org % or has been deleted.', NEW.lead_id, NEW.org_id;
   END IF;
-  PERFORM 1 FROM users
+  PERFORM 1 FROM iam.users
   WHERE id = NEW.user_id AND org_id = NEW.org_id AND NOT is_deleted;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'user_id % does not belong to org % or has been deleted.', NEW.user_id, NEW.org_id;
@@ -975,21 +1007,21 @@ BEGIN
   RETURN NEW;
 END; $$;
 
-DROP TRIGGER IF EXISTS trg_lead_interactions_fk_scope ON lead_interactions;
+DROP TRIGGER IF EXISTS trg_lead_interactions_fk_scope ON crm.lead_interactions;
 CREATE TRIGGER trg_lead_interactions_fk_scope
-  BEFORE INSERT OR UPDATE OF org_id, lead_id, user_id ON lead_interactions
-  FOR EACH ROW EXECUTE FUNCTION check_interaction_fk_org_scope();
+  BEFORE INSERT OR UPDATE OF org_id, lead_id, user_id ON crm.lead_interactions
+  FOR EACH ROW EXECUTE FUNCTION crm.check_interaction_fk_org_scope();
 
 -- Validates lead and assigned user in a follow-up share the same org.
-CREATE OR REPLACE FUNCTION check_follow_up_fk_org_scope()
+CREATE OR REPLACE FUNCTION crm.check_follow_up_fk_org_scope()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
-  PERFORM 1 FROM marketing_leads
+  PERFORM 1 FROM crm.marketing_leads
   WHERE id = NEW.lead_id AND org_id = NEW.org_id AND NOT is_deleted;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'lead_id % does not belong to org % or has been deleted.', NEW.lead_id, NEW.org_id;
   END IF;
-  PERFORM 1 FROM users
+  PERFORM 1 FROM iam.users
   WHERE id = NEW.assigned_user_id AND org_id = NEW.org_id AND NOT is_deleted;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'assigned_user_id % does not belong to org % or has been deleted.', NEW.assigned_user_id, NEW.org_id;
@@ -997,48 +1029,48 @@ BEGIN
   RETURN NEW;
 END; $$;
 
-DROP TRIGGER IF EXISTS trg_lead_follow_ups_fk_scope ON lead_follow_ups;
+DROP TRIGGER IF EXISTS trg_lead_follow_ups_fk_scope ON crm.lead_follow_ups;
 CREATE TRIGGER trg_lead_follow_ups_fk_scope
-  BEFORE INSERT OR UPDATE OF org_id, lead_id, assigned_user_id ON lead_follow_ups
-  FOR EACH ROW EXECUTE FUNCTION check_follow_up_fk_org_scope();
+  BEFORE INSERT OR UPDATE OF org_id, lead_id, assigned_user_id ON crm.lead_follow_ups
+  FOR EACH ROW EXECUTE FUNCTION crm.check_follow_up_fk_org_scope();
 
--- Set lead_follow_ups.status_id to 'pending' on INSERT when not supplied.
-CREATE OR REPLACE FUNCTION set_default_follow_up_status()
+-- Set crm.lead_follow_ups.status_id to 'pending' on INSERT when not supplied.
+CREATE OR REPLACE FUNCTION crm.set_default_follow_up_status()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
   IF NEW.status_id IS NULL THEN
-    SELECT id INTO NEW.status_id FROM follow_up_statuses WHERE name = 'pending' LIMIT 1;
+    SELECT id INTO NEW.status_id FROM crm.follow_up_statuses WHERE name = 'pending' LIMIT 1;
   END IF;
   RETURN NEW;
 END; $$;
 
-DROP TRIGGER IF EXISTS trg_lead_follow_ups_default_status ON lead_follow_ups;
+DROP TRIGGER IF EXISTS trg_lead_follow_ups_default_status ON crm.lead_follow_ups;
 CREATE TRIGGER trg_lead_follow_ups_default_status
-  BEFORE INSERT ON lead_follow_ups FOR EACH ROW EXECUTE FUNCTION set_default_follow_up_status();
+  BEFORE INSERT ON crm.lead_follow_ups FOR EACH ROW EXECUTE FUNCTION crm.set_default_follow_up_status();
 
 -- Auto-transition status when completed_at is set or cleared.
-CREATE OR REPLACE FUNCTION sync_follow_up_status()
+CREATE OR REPLACE FUNCTION crm.sync_follow_up_status()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
   IF NEW.completed_at IS NOT NULL AND OLD.completed_at IS NULL THEN
-    SELECT id INTO NEW.status_id FROM follow_up_statuses WHERE name = 'completed' LIMIT 1;
+    SELECT id INTO NEW.status_id FROM crm.follow_up_statuses WHERE name = 'completed' LIMIT 1;
   ELSIF NEW.completed_at IS NULL AND OLD.completed_at IS NOT NULL THEN
-    SELECT id INTO NEW.status_id FROM follow_up_statuses WHERE name = 'pending' LIMIT 1;
+    SELECT id INTO NEW.status_id FROM crm.follow_up_statuses WHERE name = 'pending' LIMIT 1;
   END IF;
   RETURN NEW;
 END; $$;
 
-DROP TRIGGER IF EXISTS trg_lead_follow_ups_sync_status ON lead_follow_ups;
+DROP TRIGGER IF EXISTS trg_lead_follow_ups_sync_status ON crm.lead_follow_ups;
 CREATE TRIGGER trg_lead_follow_ups_sync_status
-  BEFORE UPDATE OF completed_at ON lead_follow_ups
-  FOR EACH ROW EXECUTE FUNCTION sync_follow_up_status();
+  BEFORE UPDATE OF completed_at ON crm.lead_follow_ups
+  FOR EACH ROW EXECUTE FUNCTION crm.sync_follow_up_status();
 
 -- ===================================================================
 -- USER HIERARCHY FUNCTIONS & TRIGGERS
 -- ===================================================================
 
 -- Prevents circular manager_id chains (cycle detection).
-CREATE OR REPLACE FUNCTION check_user_hierarchy_no_cycle()
+CREATE OR REPLACE FUNCTION iam.check_user_hierarchy_no_cycle()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 DECLARE
   v_cursor  UUID;
@@ -1053,20 +1085,20 @@ BEGIN
         NEW.manager_id, NEW.id, v_visited;
     END IF;
     v_visited := v_visited || v_cursor;
-    SELECT manager_id INTO v_cursor FROM users WHERE id = v_cursor;
+    SELECT manager_id INTO v_cursor FROM iam.users WHERE id = v_cursor;
     EXIT WHEN v_cursor IS NULL;
   END LOOP;
   RETURN NEW;
 END; $$;
 
-DROP TRIGGER IF EXISTS trg_user_hierarchy_no_cycle ON users;
+DROP TRIGGER IF EXISTS trg_user_hierarchy_no_cycle ON iam.users;
 CREATE TRIGGER trg_user_hierarchy_no_cycle
-  BEFORE INSERT OR UPDATE OF manager_id ON users
-  FOR EACH ROW EXECUTE FUNCTION check_user_hierarchy_no_cycle();
+  BEFORE INSERT OR UPDATE OF manager_id ON iam.users
+  FOR EACH ROW EXECUTE FUNCTION iam.check_user_hierarchy_no_cycle();
 
--- Write to lead_assignment_log whenever assigned_user_id changes.
--- SECURITY DEFINER: app_user has only SELECT on lead_assignment_log.
-CREATE OR REPLACE FUNCTION log_lead_assignment()
+-- Write to crm.lead_assignment_log whenever assigned_user_id changes.
+-- SECURITY DEFINER: app_user has only SELECT on crm.lead_assignment_log.
+CREATE OR REPLACE FUNCTION crm.log_lead_assignment()
 RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE
   v_actor  UUID;
@@ -1082,17 +1114,17 @@ BEGIN
     WHEN v_actor = NEW.assigned_user_id                                      THEN 'self_assigned'
     ELSE 'reassigned'
   END;
-  INSERT INTO lead_assignment_log
+  INSERT INTO crm.lead_assignment_log
     (org_id, lead_id, assigned_by_id, assigned_to_id, action, previous_assignee_id)
   VALUES
     (NEW.org_id, NEW.id, v_actor, NEW.assigned_user_id, v_action, OLD.assigned_user_id);
   RETURN NEW;
 END; $$;
 
-DROP TRIGGER IF EXISTS trg_lead_assignment_log ON marketing_leads;
+DROP TRIGGER IF EXISTS trg_lead_assignment_log ON crm.marketing_leads;
 CREATE TRIGGER trg_lead_assignment_log
-  AFTER UPDATE OF assigned_user_id ON marketing_leads
-  FOR EACH ROW EXECUTE FUNCTION log_lead_assignment();
+  AFTER UPDATE OF assigned_user_id ON crm.marketing_leads
+  FOR EACH ROW EXECUTE FUNCTION crm.log_lead_assignment();
 
 -- ===================================================================
 -- ASSIGNMENT AUTHORITY FUNCTION
@@ -1100,8 +1132,8 @@ CREATE TRIGGER trg_lead_assignment_log
 
 -- Returns TRUE if acting user has authority to assign a lead to target user.
 -- 3-param version: org_id, acting_user_id, target_user_id.
--- SECURITY DEFINER: reads users + vw_user_team_members regardless of calling role.
-CREATE OR REPLACE FUNCTION can_assign_to(
+-- SECURITY DEFINER: reads iam.users + iam.vw_user_team_members regardless of calling role.
+CREATE OR REPLACE FUNCTION iam.can_assign_to(
   p_org_id         UUID,
   p_acting_user_id UUID,
   p_target_user_id UUID
@@ -1113,7 +1145,7 @@ BEGIN
   IF p_acting_user_id = p_target_user_id THEN RETURN TRUE; END IF;
 
   SELECT ur.name INTO v_role
-  FROM users u JOIN user_roles ur ON ur.id = u.role_id
+  FROM iam.users u JOIN iam.user_roles ur ON ur.id = u.role_id
   WHERE u.id = p_acting_user_id AND u.org_id = p_org_id
     AND NOT u.is_deleted AND u.is_active;
 
@@ -1122,7 +1154,7 @@ BEGIN
 
   IF v_role IN ('org_manager','org_sr_manager','senior_sales_executive') THEN
     SELECT COUNT(*) > 0 INTO v_in_scope
-    FROM vw_user_team_members
+    FROM iam.vw_user_team_members
     WHERE manager_id = p_acting_user_id
       AND member_id  = p_target_user_id
       AND org_id     = p_org_id;
@@ -1137,7 +1169,7 @@ END; $$;
 -- ===================================================================
 
 -- Recursive org chart (depth + breadcrumb path).
-CREATE OR REPLACE VIEW vw_user_org_chart AS
+CREATE OR REPLACE VIEW iam.vw_user_org_chart AS
 WITH RECURSIVE tree AS (
   SELECT u.id, u.org_id, u.first_name, u.middle_name, u.last_name, u.full_name, u.email,
          ur.name AS role_name, u.manager_id,
@@ -1145,7 +1177,7 @@ WITH RECURSIVE tree AS (
          0 AS hierarchy_level,
          ARRAY[u.id] AS ancestor_ids,
          ARRAY[u.full_name]::TEXT[] AS path_names
-  FROM users u JOIN user_roles ur ON ur.id = u.role_id
+  FROM iam.users u JOIN iam.user_roles ur ON ur.id = u.role_id
   WHERE u.manager_id IS NULL AND NOT u.is_deleted
   UNION ALL
   SELECT u.id, u.org_id, u.first_name, u.middle_name, u.last_name, u.full_name, u.email,
@@ -1154,7 +1186,7 @@ WITH RECURSIVE tree AS (
          t.hierarchy_level + 1,
          t.ancestor_ids || u.id,
          t.path_names   || u.full_name
-  FROM users u JOIN user_roles ur ON ur.id = u.role_id
+  FROM iam.users u JOIN iam.user_roles ur ON ur.id = u.role_id
   JOIN tree t ON t.id = u.manager_id
   WHERE NOT u.is_deleted AND NOT (u.id = ANY(t.ancestor_ids))
 )
@@ -1163,20 +1195,20 @@ SELECT id AS user_id, org_id, first_name, middle_name, last_name, full_name, ema
        array_to_string(path_names, ' > ') AS reporting_path, ancestor_ids
 FROM tree;
 
--- Recursive subtree membership — used by can_assign_to for hierarchy authority.
-CREATE OR REPLACE VIEW vw_user_team_members AS
+-- Recursive subtree membership — used by iam.can_assign_to for hierarchy authority.
+CREATE OR REPLACE VIEW iam.vw_user_team_members AS
 WITH RECURSIVE subtree AS (
   SELECT u.id AS manager_id, u.org_id, u.id AS member_id,
          u.full_name AS member_full_name, u.email AS member_email,
          ur.name AS member_role, u.manager_id AS direct_manager_id,
          0 AS depth, u.is_active, ARRAY[u.id] AS visited
-  FROM users u JOIN user_roles ur ON ur.id = u.role_id WHERE NOT u.is_deleted
+  FROM iam.users u JOIN iam.user_roles ur ON ur.id = u.role_id WHERE NOT u.is_deleted
   UNION ALL
   SELECT s.manager_id, u.org_id, u.id AS member_id,
          u.full_name, u.email, ur.name AS member_role,
          u.manager_id AS direct_manager_id, s.depth + 1, u.is_active,
          s.visited || u.id
-  FROM users u JOIN user_roles ur ON ur.id = u.role_id
+  FROM iam.users u JOIN iam.user_roles ur ON ur.id = u.role_id
   JOIN subtree s ON s.member_id = u.manager_id
   WHERE NOT u.is_deleted AND NOT (u.id = ANY(s.visited))
 )
@@ -1186,7 +1218,7 @@ FROM subtree WHERE depth > 0;
 
 -- Primary lead listing.
 -- city = ml.city (free-text, always populated); city_name = from geographic FK (when available).
-CREATE OR REPLACE VIEW vw_dashboard_leads WITH (security_invoker = true) AS
+CREATE OR REPLACE VIEW crm.vw_dashboard_leads WITH (security_invoker = true) AS
 SELECT
   ml.id                AS lead_id,
   ml.org_id,
@@ -1225,21 +1257,21 @@ SELECT
   ml.is_deleted,
   ml.created_at,
   ml.updated_at
-FROM  marketing_leads     ml
-JOIN  organizations        o    ON o.id    = ml.org_id
-LEFT JOIN lead_stage       ls   ON ls.id   = ml.stage_id
-LEFT JOIN lead_stage_outcome lso ON lso.id = ml.outcome_id
-LEFT JOIN ad_campaigns     ac   ON ac.id   = ml.campaign_id
-LEFT JOIN marketing_platforms mp ON mp.id  = ac.platform_id
-LEFT JOIN users            u    ON u.id    = ml.assigned_user_id
-LEFT JOIN lead_sources     src  ON src.id  = ml.source_id
-LEFT JOIN branches         br   ON br.id   = ml.branch_id
-LEFT JOIN cities           ci   ON ci.id   = ml.city_id
-LEFT JOIN states           st   ON st.id   = ml.state_id
-LEFT JOIN countries        co   ON co.id   = ml.country_id;
+FROM  crm.marketing_leads     ml
+JOIN  entity.organizations        o    ON o.id    = ml.org_id
+LEFT JOIN crm.lead_stage       ls   ON ls.id   = ml.stage_id
+LEFT JOIN crm.lead_stage_outcome lso ON lso.id = ml.outcome_id
+LEFT JOIN marketing.ad_campaigns     ac   ON ac.id   = ml.campaign_id
+LEFT JOIN marketing.marketing_platforms mp ON mp.id  = ac.platform_id
+LEFT JOIN iam.users            u    ON u.id    = ml.assigned_user_id
+LEFT JOIN crm.lead_sources     src  ON src.id  = ml.source_id
+LEFT JOIN entity.branches         br   ON br.id   = ml.branch_id
+LEFT JOIN geo.cities           ci   ON ci.id   = ml.city_id
+LEFT JOIN geo.states           st   ON st.id   = ml.state_id
+LEFT JOIN geo.countries        co   ON co.id   = ml.country_id;
 
 -- Unified lead timeline: status changes + follow-ups + interactions + assignment changes.
-CREATE OR REPLACE VIEW vw_lead_followup_timeline WITH (security_invoker = true) AS
+CREATE OR REPLACE VIEW crm.vw_lead_followup_timeline WITH (security_invoker = true) AS
 SELECT
   lsl.id AS event_id, lsl.org_id, lsl.lead_id,
   'status_change'     AS event_type,
@@ -1256,13 +1288,13 @@ SELECT
   NULL::timestamptz   AS scheduled_at,
   NULL::timestamptz   AS completed_at,
   NULL::text          AS interaction_type
-FROM lead_status_log lsl
-LEFT JOIN users              cb  ON cb.id  = lsl.changed_by_id
-LEFT JOIN lead_stage         os  ON os.id  = lsl.old_stage_id
-JOIN  lead_stage             ns  ON ns.id  = lsl.new_stage_id
-LEFT JOIN lead_stage_outcome ofr ON ofr.id = lsl.old_outcome_id
-LEFT JOIN lead_stage_outcome nfr ON nfr.id = lsl.new_outcome_id
-LEFT JOIN users              au  ON au.id  = lsl.assigned_user_id
+FROM crm.lead_status_log lsl
+LEFT JOIN iam.users              cb  ON cb.id  = lsl.changed_by_id
+LEFT JOIN crm.lead_stage         os  ON os.id  = lsl.old_stage_id
+JOIN  crm.lead_stage             ns  ON ns.id  = lsl.new_stage_id
+LEFT JOIN crm.lead_stage_outcome ofr ON ofr.id = lsl.old_outcome_id
+LEFT JOIN crm.lead_stage_outcome nfr ON nfr.id = lsl.new_outcome_id
+LEFT JOIN iam.users              au  ON au.id  = lsl.assigned_user_id
 
 UNION ALL
 
@@ -1274,9 +1306,9 @@ SELECT
   NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,
   u.full_name, lf.notes,
   lf.id, fs.name, lf.scheduled_at, lf.completed_at, NULL
-FROM lead_follow_ups lf
-JOIN follow_up_statuses fs ON fs.id = lf.status_id
-JOIN users u ON u.id = lf.assigned_user_id
+FROM crm.lead_follow_ups lf
+JOIN crm.follow_up_statuses fs ON fs.id = lf.status_id
+JOIN iam.users u ON u.id = lf.assigned_user_id
 WHERE NOT lf.is_deleted
 
 UNION ALL
@@ -1289,9 +1321,9 @@ SELECT
   NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,
   NULL, li.notes,
   NULL, NULL, NULL, NULL, it.name
-FROM lead_interactions li
-LEFT JOIN interaction_types it ON it.id = li.interaction_type_id
-JOIN users u ON u.id = li.user_id
+FROM crm.lead_interactions li
+LEFT JOIN crm.interaction_types it ON it.id = li.interaction_type_id
+JOIN iam.users u ON u.id = li.user_id
 WHERE NOT li.is_deleted
 
 UNION ALL
@@ -1309,15 +1341,15 @@ SELECT
     ELSE 'Reassigned from ' || old_u.full_name || ' to ' || COALESCE(new_u.full_name, 'unknown')
   END,
   NULL, NULL, NULL, NULL, NULL
-FROM marketing_leads_history mlh
-JOIN marketing_leads ml  ON ml.id   = mlh.lead_id
-LEFT JOIN users cu       ON cu.id   = mlh.changed_by_user_id
-LEFT JOIN users old_u    ON old_u.id = (mlh.changed_fields -> 'assigned_user_id' ->> 'old')::uuid
-LEFT JOIN users new_u    ON new_u.id = (mlh.changed_fields -> 'assigned_user_id' ->> 'new')::uuid
+FROM audit.marketing_leads_history mlh
+JOIN crm.marketing_leads ml  ON ml.id   = mlh.lead_id
+LEFT JOIN iam.users cu       ON cu.id   = mlh.changed_by_user_id
+LEFT JOIN iam.users old_u    ON old_u.id = (mlh.changed_fields -> 'assigned_user_id' ->> 'old')::uuid
+LEFT JOIN iam.users new_u    ON new_u.id = (mlh.changed_fields -> 'assigned_user_id' ->> 'new')::uuid
 WHERE mlh.operation = 'U' AND mlh.changed_fields ? 'assigned_user_id';
 
 -- Assignment history for a lead (who held it, for how long).
-CREATE OR REPLACE VIEW vw_lead_assignment_timeline AS
+CREATE OR REPLACE VIEW crm.vw_lead_assignment_timeline AS
 SELECT
   l.id AS log_id, l.org_id, l.lead_id, ml.full_name AS lead_full_name,
   actor.full_name  AS assigned_by_name,  actor.email  AS assigned_by_email,
@@ -1326,28 +1358,28 @@ SELECT
   l.action, l.note, l.assigned_at,
   LEAD(l.assigned_at) OVER (PARTITION BY l.lead_id ORDER BY l.assigned_at)
     - l.assigned_at AS held_for
-FROM lead_assignment_log l
-JOIN  marketing_leads ml  ON ml.id    = l.lead_id
-LEFT JOIN users actor     ON actor.id  = l.assigned_by_id
-LEFT JOIN users target    ON target.id = l.assigned_to_id
-LEFT JOIN users prev      ON prev.id   = l.previous_assignee_id;
+FROM crm.lead_assignment_log l
+JOIN  crm.marketing_leads ml  ON ml.id    = l.lead_id
+LEFT JOIN iam.users actor     ON actor.id  = l.assigned_by_id
+LEFT JOIN iam.users target    ON target.id = l.assigned_to_id
+LEFT JOIN iam.users prev      ON prev.id   = l.previous_assignee_id;
 
 -- Follow-up queue: pending + missed only.
-CREATE OR REPLACE VIEW vw_sales_follow_up_pipeline WITH (security_invoker = true) AS
+CREATE OR REPLACE VIEW crm.vw_sales_follow_up_pipeline WITH (security_invoker = true) AS
 SELECT
   lf.id AS follow_up_id, lf.org_id, o.name AS org_name,
   ml.full_name AS lead_full_name, ml.phone AS lead_phone, ml.email AS lead_email,
   u.full_name AS assigned_rep_name, u.email AS assigned_rep_email,
   fs.name AS status, lf.scheduled_at, lf.completed_at, lf.notes
-FROM lead_follow_ups lf
-JOIN marketing_leads     ml ON ml.id  = lf.lead_id
-JOIN users               u  ON u.id   = lf.assigned_user_id
-JOIN follow_up_statuses  fs ON fs.id  = lf.status_id
-JOIN organizations       o  ON o.id   = lf.org_id
+FROM crm.lead_follow_ups lf
+JOIN crm.marketing_leads     ml ON ml.id  = lf.lead_id
+JOIN iam.users               u  ON u.id   = lf.assigned_user_id
+JOIN crm.follow_up_statuses  fs ON fs.id  = lf.status_id
+JOIN entity.organizations       o  ON o.id   = lf.org_id
 WHERE fs.name IN ('pending','missed');
 
 -- Enriched follow-up pipeline with overdue flag + last interaction.
-CREATE OR REPLACE VIEW vw_followup_pipeline_enriched WITH (security_invoker = true) AS
+CREATE OR REPLACE VIEW crm.vw_followup_pipeline_enriched WITH (security_invoker = true) AS
 SELECT
   lf.id AS follow_up_id, lf.org_id, o.name AS org_name, lf.lead_id,
   ml.full_name AS lead_full_name, ml.phone AS lead_phone, ml.email AS lead_email,
@@ -1360,48 +1392,48 @@ SELECT
        ELSE NULL END AS minutes_overdue,
   last_ix.occurred_at AS last_interaction_at,
   last_ix.type_name   AS last_interaction_type
-FROM lead_follow_ups lf
-JOIN marketing_leads     ml ON ml.id  = lf.lead_id
-JOIN lead_stage          ls ON ls.id  = ml.stage_id
-JOIN follow_up_statuses  fs ON fs.id  = lf.status_id
-JOIN users               u  ON u.id   = lf.assigned_user_id
-JOIN organizations       o  ON o.id   = lf.org_id
+FROM crm.lead_follow_ups lf
+JOIN crm.marketing_leads     ml ON ml.id  = lf.lead_id
+JOIN crm.lead_stage          ls ON ls.id  = ml.stage_id
+JOIN crm.follow_up_statuses  fs ON fs.id  = lf.status_id
+JOIN iam.users               u  ON u.id   = lf.assigned_user_id
+JOIN entity.organizations       o  ON o.id   = lf.org_id
 LEFT JOIN LATERAL (
   SELECT li.occurred_at, it.name AS type_name
-  FROM lead_interactions li
-  LEFT JOIN interaction_types it ON it.id = li.interaction_type_id
+  FROM crm.lead_interactions li
+  LEFT JOIN crm.interaction_types it ON it.id = li.interaction_type_id
   WHERE li.lead_id = lf.lead_id AND NOT li.is_deleted
   ORDER BY li.occurred_at DESC LIMIT 1
 ) last_ix ON TRUE
 WHERE NOT lf.is_deleted AND NOT ml.is_deleted AND fs.name IN ('pending','missed');
 
 -- Per-org KPIs for analytics service.
-CREATE OR REPLACE VIEW vw_org_performance_snapshot WITH (security_invoker = true) AS
+CREATE OR REPLACE VIEW crm.vw_org_performance_snapshot WITH (security_invoker = true) AS
 WITH lead_counts AS (
   SELECT ml.org_id,
     COUNT(*)                                        AS total_leads,
     COUNT(*) FILTER (WHERE ls.name = 'converted')   AS converted_leads,
     COUNT(*) FILTER (WHERE ls.name = 'unqualified') AS unqualified_leads
-  FROM marketing_leads ml JOIN lead_stage ls ON ls.id = ml.stage_id
+  FROM crm.marketing_leads ml JOIN crm.lead_stage ls ON ls.id = ml.stage_id
   WHERE NOT ml.is_deleted GROUP BY ml.org_id
 ),
 interaction_stats AS (
   SELECT org_id, COUNT(*) AS total_interactions, COUNT(DISTINCT lead_id) AS leads_with_interactions
-  FROM lead_interactions WHERE NOT is_deleted GROUP BY org_id
+  FROM crm.lead_interactions WHERE NOT is_deleted GROUP BY org_id
 ),
 follow_up_counts AS (
   SELECT lf.org_id,
     COUNT(*) FILTER (WHERE fs.name = 'pending') AS pending_follow_ups,
     COUNT(*) FILTER (WHERE fs.name = 'missed')  AS missed_follow_ups
-  FROM lead_follow_ups lf JOIN follow_up_statuses fs ON fs.id = lf.status_id
+  FROM crm.lead_follow_ups lf JOIN crm.follow_up_statuses fs ON fs.id = lf.status_id
   WHERE NOT lf.is_deleted GROUP BY lf.org_id
 ),
 platform_usage AS (
   SELECT org_id, most_used_platform FROM (
     SELECT ac.org_id, mp.name AS most_used_platform, COUNT(ml.id) AS lead_count,
            ROW_NUMBER() OVER (PARTITION BY ac.org_id ORDER BY COUNT(ml.id) DESC) AS rn
-    FROM ad_campaigns ac JOIN marketing_platforms mp ON mp.id = ac.platform_id
-    LEFT JOIN marketing_leads ml ON ml.campaign_id = ac.id AND NOT ml.is_deleted
+    FROM marketing.ad_campaigns ac JOIN marketing.marketing_platforms mp ON mp.id = ac.platform_id
+    LEFT JOIN crm.marketing_leads ml ON ml.campaign_id = ac.id AND NOT ml.is_deleted
     WHERE NOT ac.is_deleted GROUP BY ac.org_id, mp.name
   ) r WHERE rn = 1
 )
@@ -1417,7 +1449,7 @@ SELECT
   COALESCE(fc.missed_follow_ups,  0)::INT AS missed_follow_ups,
   pu.most_used_platform,
   CLOCK_TIMESTAMP() AS snapshot_at
-FROM organizations o
+FROM entity.organizations o
 LEFT JOIN lead_counts lc ON lc.org_id = o.id
 LEFT JOIN interaction_stats ist ON ist.org_id = o.id
 LEFT JOIN follow_up_counts fc ON fc.org_id = o.id
@@ -1425,7 +1457,7 @@ LEFT JOIN platform_usage pu ON pu.org_id = o.id
 WHERE NOT o.is_deleted;
 
 -- Cross-org tenant KPIs (query as tenant_admin role).
-CREATE OR REPLACE VIEW vw_tenant_full_dashboard WITH (security_invoker = true) AS
+CREATE OR REPLACE VIEW crm.vw_tenant_full_dashboard WITH (security_invoker = true) AS
 WITH org_leads AS (
   SELECT ml.org_id,
     COUNT(*)                                               AS total_leads,
@@ -1435,7 +1467,7 @@ WITH org_leads AS (
     COUNT(*) FILTER (WHERE ls.name = 'converted')         AS converted_leads,
     COUNT(*) FILTER (WHERE ls.name = 'unqualified')       AS unqualified_leads,
     COUNT(*) FILTER (WHERE ls.name = 'transferred_out')   AS transferred_out_leads
-  FROM marketing_leads ml JOIN lead_stage ls ON ls.id = ml.stage_id
+  FROM crm.marketing_leads ml JOIN crm.lead_stage ls ON ls.id = ml.stage_id
   WHERE NOT ml.is_deleted GROUP BY ml.org_id
 ),
 org_follow_ups AS (
@@ -1443,15 +1475,15 @@ org_follow_ups AS (
     COUNT(*) FILTER (WHERE fs.name = 'pending')   AS pending_follow_ups,
     COUNT(*) FILTER (WHERE fs.name = 'missed')    AS missed_follow_ups,
     COUNT(*) FILTER (WHERE fs.name = 'completed') AS completed_follow_ups
-  FROM lead_follow_ups lf JOIN follow_up_statuses fs ON fs.id = lf.status_id
+  FROM crm.lead_follow_ups lf JOIN crm.follow_up_statuses fs ON fs.id = lf.status_id
   WHERE NOT lf.is_deleted GROUP BY lf.org_id
 ),
 org_platform AS (
   SELECT org_id, most_used_platform FROM (
     SELECT ac.org_id, mp.name AS most_used_platform, COUNT(ml.id) AS cnt,
            ROW_NUMBER() OVER (PARTITION BY ac.org_id ORDER BY COUNT(ml.id) DESC) AS rn
-    FROM ad_campaigns ac JOIN marketing_platforms mp ON mp.id = ac.platform_id
-    LEFT JOIN marketing_leads ml ON ml.campaign_id = ac.id AND NOT ml.is_deleted
+    FROM marketing.ad_campaigns ac JOIN marketing.marketing_platforms mp ON mp.id = ac.platform_id
+    LEFT JOIN crm.marketing_leads ml ON ml.campaign_id = ac.id AND NOT ml.is_deleted
     WHERE NOT ac.is_deleted GROUP BY ac.org_id, mp.name
   ) r WHERE rn = 1
 )
@@ -1475,18 +1507,109 @@ SELECT
   COALESCE(ofu.completed_follow_ups, 0)::INT AS completed_follow_ups,
   op.most_used_platform,
   CLOCK_TIMESTAMP() AS snapshot_at
-FROM organizations o
-JOIN tenants t ON t.id = o.tenant_id
-LEFT JOIN org_types ot ON ot.id = o.org_type_id
-LEFT JOIN cities    ci ON ci.id = o.city_id
-LEFT JOIN states    st ON st.id = o.state_id
+FROM entity.organizations o
+JOIN entity.tenants t ON t.id = o.tenant_id
+LEFT JOIN entity.org_types ot ON ot.id = o.org_type_id
+LEFT JOIN geo.cities    ci ON ci.id = o.city_id
+LEFT JOIN geo.states    st ON st.id = o.state_id
 LEFT JOIN org_leads ol ON ol.org_id = o.id
 LEFT JOIN org_follow_ups ofu ON ofu.org_id = o.id
 LEFT JOIN org_platform   op  ON op.org_id  = o.id
 WHERE NOT o.is_deleted AND NOT t.is_deleted;
 
+-- ── ADDITIONAL VIEWS (v1.2) ───────────────────────────────────────
+
+-- All active org-user mappings with role and org context.
+-- Used by APIs that need to know which orgs a user can access.
+CREATE OR REPLACE VIEW iam.vw_user_org_access WITH (security_invoker = true) AS
+SELECT
+  uom.user_id,
+  u.full_name     AS user_full_name,
+  u.email         AS user_email,
+  u.is_active     AS user_is_active,
+  uom.org_id,
+  o.name          AS org_name,
+  o.tenant_id,
+  t.name          AS tenant_name,
+  ur.name         AS role_name,
+  ur.label        AS role_label,
+  ur.rank         AS role_rank,
+  uom.granted_at,
+  uom.updated_at  AS mapping_updated_at
+FROM iam.user_org_mapping uom
+JOIN iam.users          u  ON u.id  = uom.user_id  AND NOT u.is_deleted
+JOIN entity.organizations  o  ON o.id  = uom.org_id   AND NOT o.is_deleted
+JOIN entity.tenants        t  ON t.id  = o.tenant_id   AND NOT t.is_deleted
+JOIN iam.user_roles     ur ON ur.id = uom.role_id
+WHERE uom.is_active;
+
+-- Branches with org and tenant context (for dropdowns and filtering).
+CREATE OR REPLACE VIEW entity.vw_branch_lookup WITH (security_invoker = true) AS
+SELECT
+  b.id          AS branch_id,
+  b.name        AS branch_name,
+  b.is_active,
+  b.org_id,
+  o.name        AS org_name,
+  o.tenant_id,
+  t.name        AS tenant_name,
+  b.created_at
+FROM entity.branches       b
+JOIN entity.organizations  o ON o.id = b.org_id     AND NOT o.is_deleted
+JOIN entity.tenants        t ON t.id = o.tenant_id  AND NOT t.is_deleted;
+
+-- Ad campaigns with resolved platform and status names (for dropdowns).
+CREATE OR REPLACE VIEW marketing.vw_campaign_lookup WITH (security_invoker = true) AS
+SELECT
+  ac.id         AS campaign_id,
+  ac.name       AS campaign_name,
+  ac.org_id,
+  o.name        AS org_name,
+  mp.name       AS platform_name,
+  mp.id         AS platform_id,
+  cs.name       AS status_name,
+  cs.id         AS status_id,
+  ac.budget,
+  ac.started_at,
+  ac.ended_at,
+  ac.created_at
+FROM marketing.ad_campaigns      ac
+JOIN entity.organizations     o  ON o.id  = ac.org_id      AND NOT o.is_deleted
+JOIN marketing.marketing_platforms mp ON mp.id = ac.platform_id
+JOIN marketing.campaign_statuses cs ON cs.id  = ac.status_id
+WHERE NOT ac.is_deleted;
+
+-- Per-rep lead counts by stage (org-scoped, for analytics / leaderboard).
+CREATE OR REPLACE VIEW crm.vw_rep_performance WITH (security_invoker = true) AS
+SELECT
+  ml.org_id,
+  o.name                AS org_name,
+  u.id                  AS rep_id,
+  u.full_name           AS rep_name,
+  u.email               AS rep_email,
+  ur.name               AS role_name,
+  COUNT(*)              AS total_assigned,
+  COUNT(*) FILTER (WHERE ls.name = 'new')            AS new_count,
+  COUNT(*) FILTER (WHERE ls.name = 'contacting')     AS contacting_count,
+  COUNT(*) FILTER (WHERE ls.name = 'qualified')      AS qualified_count,
+  COUNT(*) FILTER (WHERE ls.name = 'converted')      AS converted_count,
+  COUNT(*) FILTER (WHERE ls.name = 'unqualified')    AS unqualified_count,
+  COUNT(*) FILTER (WHERE ls.name = 'transferred_out') AS transferred_out_count,
+  CASE WHEN COUNT(*) = 0 THEN 0::NUMERIC(5,2)
+       ELSE ROUND(
+         COUNT(*) FILTER (WHERE ls.name = 'converted')::NUMERIC / COUNT(*) * 100, 2
+       )
+  END                   AS conversion_rate_pct
+FROM crm.marketing_leads ml
+JOIN iam.users          u  ON u.id  = ml.assigned_user_id AND NOT u.is_deleted
+JOIN iam.user_roles     ur ON ur.id = u.role_id
+JOIN entity.organizations  o  ON o.id  = ml.org_id
+JOIN crm.lead_stage     ls ON ls.id = ml.stage_id
+WHERE NOT ml.is_deleted
+GROUP BY ml.org_id, o.name, u.id, u.full_name, u.email, ur.name;
+
 -- Campaign performance (tenant_admin scope).
-CREATE OR REPLACE VIEW vw_tenant_campaign_summary WITH (security_invoker = true) AS
+CREATE OR REPLACE VIEW marketing.vw_tenant_campaign_summary WITH (security_invoker = true) AS
 WITH cls AS (
   SELECT sub.campaign_id,
     SUM(sub.stage_cnt)::INT AS total_leads,
@@ -1494,9 +1617,9 @@ WITH cls AS (
     jsonb_object_agg(ls.name, sub.stage_cnt) AS leads_by_stage
   FROM (
     SELECT campaign_id, stage_id, COUNT(*) AS stage_cnt
-    FROM marketing_leads WHERE campaign_id IS NOT NULL AND NOT is_deleted
+    FROM crm.marketing_leads WHERE campaign_id IS NOT NULL AND NOT is_deleted
     GROUP BY campaign_id, stage_id
-  ) sub JOIN lead_stage ls ON ls.id = sub.stage_id GROUP BY sub.campaign_id
+  ) sub JOIN crm.lead_stage ls ON ls.id = sub.stage_id GROUP BY sub.campaign_id
 )
 SELECT
   o.tenant_id, ac.org_id, o.name AS org_name,
@@ -1507,10 +1630,10 @@ SELECT
   CASE WHEN COALESCE(cls.total_leads, 0) = 0 THEN 0::NUMERIC(5,2)
        ELSE ROUND(COALESCE(cls.converted_leads,0)::NUMERIC / cls.total_leads * 100, 2)
   END AS conversion_rate
-FROM ad_campaigns ac
-JOIN organizations o ON o.id = ac.org_id
-JOIN marketing_platforms mp ON mp.id = ac.platform_id
-JOIN campaign_statuses cs ON cs.id = ac.status_id
+FROM marketing.ad_campaigns ac
+JOIN entity.organizations o ON o.id = ac.org_id
+JOIN marketing.marketing_platforms mp ON mp.id = ac.platform_id
+JOIN marketing.campaign_statuses cs ON cs.id = ac.status_id
 LEFT JOIN cls ON cls.campaign_id = ac.id
 WHERE NOT ac.is_deleted;
 
@@ -1518,34 +1641,34 @@ WHERE NOT ac.is_deleted;
 -- AUDIT TRIGGER FUNCTIONS
 -- ===================================================================
 
--- RLS on marketing_leads_history.
+-- RLS on audit.marketing_leads_history.
 -- INSERT from the SECURITY DEFINER function bypasses RLS; SELECT is gated.
-ALTER TABLE marketing_leads_history ENABLE ROW LEVEL SECURITY;
-ALTER TABLE marketing_leads_history FORCE ROW LEVEL SECURITY;
+ALTER TABLE audit.marketing_leads_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit.marketing_leads_history FORCE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS history_org_isolation    ON marketing_leads_history;
-DROP POLICY IF EXISTS history_tenant_isolation ON marketing_leads_history;
+DROP POLICY IF EXISTS history_org_isolation    ON audit.marketing_leads_history;
+DROP POLICY IF EXISTS history_tenant_isolation ON audit.marketing_leads_history;
 
-CREATE POLICY history_org_isolation ON marketing_leads_history
+CREATE POLICY history_org_isolation ON audit.marketing_leads_history
   AS PERMISSIVE FOR SELECT TO app_user
   USING (EXISTS (
-    SELECT 1 FROM marketing_leads ml
-    WHERE ml.id = marketing_leads_history.lead_id
+    SELECT 1 FROM crm.marketing_leads ml
+    WHERE ml.id = audit.marketing_leads_history.lead_id
       AND ml.org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid
   ));
 
-CREATE POLICY history_tenant_isolation ON marketing_leads_history
+CREATE POLICY history_tenant_isolation ON audit.marketing_leads_history
   AS PERMISSIVE FOR SELECT TO tenant_admin
   USING (EXISTS (
-    SELECT 1 FROM marketing_leads ml
-    JOIN organizations o ON o.id = ml.org_id
-    WHERE ml.id = marketing_leads_history.lead_id
+    SELECT 1 FROM crm.marketing_leads ml
+    JOIN entity.organizations o ON o.id = ml.org_id
+    WHERE ml.id = audit.marketing_leads_history.lead_id
       AND o.tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
   ));
 
--- Audit trigger for marketing_leads (field-level diff on UPDATE, snapshot on DELETE).
--- SECURITY DEFINER: app_user has no INSERT on marketing_leads_history.
-CREATE OR REPLACE FUNCTION audit_marketing_leads_changes()
+-- Audit trigger for crm.marketing_leads (field-level diff on UPDATE, snapshot on DELETE).
+-- SECURITY DEFINER: app_user has no INSERT on audit.marketing_leads_history.
+CREATE OR REPLACE FUNCTION audit.audit_marketing_leads_changes()
 RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE
   k_skip CONSTANT TEXT[] := ARRAY['updated_at','created_at','id','deleted_at','deleted_by'];
@@ -1572,44 +1695,44 @@ BEGIN
       END IF;
     END LOOP;
     IF v_diff = '{}'::jsonb THEN RETURN NEW; END IF;
-    INSERT INTO marketing_leads_history (lead_id, changed_by_user_id, operation, changed_fields)
+    INSERT INTO audit.marketing_leads_history (lead_id, changed_by_user_id, operation, changed_fields)
     VALUES (NEW.id, v_changed_by, 'U', v_diff);
     RETURN NEW;
   ELSIF TG_OP = 'DELETE' THEN
-    INSERT INTO marketing_leads_history (lead_id, changed_by_user_id, operation, changed_fields)
+    INSERT INTO audit.marketing_leads_history (lead_id, changed_by_user_id, operation, changed_fields)
     VALUES (OLD.id, v_changed_by, 'D', to_jsonb(OLD));
     RETURN OLD;
   END IF;
   RETURN NULL;
 END; $$;
 
-DROP TRIGGER IF EXISTS trg_marketing_leads_audit ON marketing_leads;
+DROP TRIGGER IF EXISTS trg_marketing_leads_audit ON crm.marketing_leads;
 CREATE TRIGGER trg_marketing_leads_audit
-  AFTER UPDATE OR DELETE ON marketing_leads
-  FOR EACH ROW EXECUTE FUNCTION audit_marketing_leads_changes();
+  AFTER UPDATE OR DELETE ON crm.marketing_leads
+  FOR EACH ROW EXECUTE FUNCTION audit.audit_marketing_leads_changes();
 
--- RLS on audit_log.
-ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
-ALTER TABLE audit_log FORCE ROW LEVEL SECURITY;
+-- RLS on audit.audit_log.
+ALTER TABLE audit.audit_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit.audit_log FORCE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS org_isolation_policy    ON audit_log;
-DROP POLICY IF EXISTS tenant_isolation_policy ON audit_log;
+DROP POLICY IF EXISTS org_isolation_policy    ON audit.audit_log;
+DROP POLICY IF EXISTS tenant_isolation_policy ON audit.audit_log;
 
-CREATE POLICY org_isolation_policy ON audit_log
+CREATE POLICY org_isolation_policy ON audit.audit_log
   AS PERMISSIVE FOR SELECT TO app_user
   USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
 
-CREATE POLICY tenant_isolation_policy ON audit_log
+CREATE POLICY tenant_isolation_policy ON audit.audit_log
   AS PERMISSIVE FOR SELECT TO tenant_admin
   USING (org_id IN (
-    SELECT id FROM organizations
+    SELECT id FROM entity.organizations
     WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
       AND NOT is_deleted
   ));
 
--- Generic audit trigger for all operational tables except marketing_leads.
--- SECURITY DEFINER: app_user has no INSERT on audit_log.
-CREATE OR REPLACE FUNCTION audit_row_changes()
+-- Generic audit trigger for all operational tables except crm.marketing_leads.
+-- SECURITY DEFINER: app_user has no INSERT on audit.audit_log.
+CREATE OR REPLACE FUNCTION audit.audit_row_changes()
 RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE
   k_skip   CONSTANT TEXT[] := ARRAY['updated_at','created_at','id','deleted_at','deleted_by','created_by'];
@@ -1640,40 +1763,40 @@ BEGIN
     IF v_diff = '{}'::jsonb THEN RETURN NEW; END IF;
     v_record_id := (to_jsonb(NEW) ->> 'id')::uuid;
     v_org_id    := NULLIF(to_jsonb(NEW) ->> 'org_id', '')::uuid;
-    INSERT INTO audit_log (table_name, operation, record_id, row_id, org_id, changed_by, actor_id, changed_fields, old_data, new_data)
+    INSERT INTO audit.audit_log (table_name, operation, record_id, row_id, org_id, changed_by, actor_id, changed_fields, old_data, new_data)
     VALUES (TG_TABLE_NAME, 'U', v_record_id, v_record_id, v_org_id, v_changed_by, v_changed_by, v_diff, v_old_json, to_jsonb(NEW));
     RETURN NEW;
   ELSIF TG_OP = 'DELETE' THEN
     v_old_json  := to_jsonb(OLD);
     v_record_id := (v_old_json ->> 'id')::uuid;
     v_org_id    := NULLIF(v_old_json ->> 'org_id', '')::uuid;
-    INSERT INTO audit_log (table_name, operation, record_id, row_id, org_id, changed_by, actor_id, changed_fields, old_data)
+    INSERT INTO audit.audit_log (table_name, operation, record_id, row_id, org_id, changed_by, actor_id, changed_fields, old_data)
     VALUES (TG_TABLE_NAME, 'D', v_record_id, v_record_id, v_org_id, v_changed_by, v_changed_by, v_old_json, v_old_json);
     RETURN OLD;
   END IF;
   RETURN NULL;
 END; $$;
 
-DROP TRIGGER IF EXISTS trg_users_audit           ON users;
+DROP TRIGGER IF EXISTS trg_users_audit           ON iam.users;
 CREATE TRIGGER trg_users_audit
-  AFTER UPDATE OR DELETE ON users FOR EACH ROW EXECUTE FUNCTION audit_row_changes();
+  AFTER UPDATE OR DELETE ON iam.users FOR EACH ROW EXECUTE FUNCTION audit.audit_row_changes();
 
-DROP TRIGGER IF EXISTS trg_ad_campaigns_audit    ON ad_campaigns;
+DROP TRIGGER IF EXISTS trg_ad_campaigns_audit    ON marketing.ad_campaigns;
 CREATE TRIGGER trg_ad_campaigns_audit
-  AFTER UPDATE OR DELETE ON ad_campaigns FOR EACH ROW EXECUTE FUNCTION audit_row_changes();
+  AFTER UPDATE OR DELETE ON marketing.ad_campaigns FOR EACH ROW EXECUTE FUNCTION audit.audit_row_changes();
 
-DROP TRIGGER IF EXISTS trg_lead_interactions_audit ON lead_interactions;
+DROP TRIGGER IF EXISTS trg_lead_interactions_audit ON crm.lead_interactions;
 CREATE TRIGGER trg_lead_interactions_audit
-  AFTER UPDATE OR DELETE ON lead_interactions FOR EACH ROW EXECUTE FUNCTION audit_row_changes();
+  AFTER UPDATE OR DELETE ON crm.lead_interactions FOR EACH ROW EXECUTE FUNCTION audit.audit_row_changes();
 
-DROP TRIGGER IF EXISTS trg_lead_follow_ups_audit ON lead_follow_ups;
+DROP TRIGGER IF EXISTS trg_lead_follow_ups_audit ON crm.lead_follow_ups;
 CREATE TRIGGER trg_lead_follow_ups_audit
-  AFTER UPDATE OR DELETE ON lead_follow_ups FOR EACH ROW EXECUTE FUNCTION audit_row_changes();
+  AFTER UPDATE OR DELETE ON crm.lead_follow_ups FOR EACH ROW EXECUTE FUNCTION audit.audit_row_changes();
 
 -- Lead stage transition log.
--- SECURITY DEFINER: app_user has no INSERT on lead_status_log.
+-- SECURITY DEFINER: app_user has no INSERT on crm.lead_status_log.
 -- transition_note is read from app.lead_transition_note session GUC set by the API.
-CREATE OR REPLACE FUNCTION log_lead_stage_change()
+CREATE OR REPLACE FUNCTION crm.log_lead_stage_change()
 RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE
   v_changed_by UUID;
@@ -1692,7 +1815,7 @@ BEGIN
     v_note := NULLIF(current_setting('app.lead_transition_note', true), '');
   EXCEPTION WHEN OTHERS THEN v_note := NULL; END;
 
-  INSERT INTO lead_status_log (
+  INSERT INTO crm.lead_status_log (
     org_id, lead_id,
     old_stage_id, new_stage_id,
     old_outcome_id, new_outcome_id,
@@ -1710,172 +1833,172 @@ BEGIN
   RETURN NEW;
 END; $$;
 
-DROP TRIGGER IF EXISTS trg_lead_status_log  ON marketing_leads;
-DROP TRIGGER IF EXISTS trg_lead_stage_log   ON marketing_leads;
+DROP TRIGGER IF EXISTS trg_lead_status_log  ON crm.marketing_leads;
+DROP TRIGGER IF EXISTS trg_lead_stage_log   ON crm.marketing_leads;
 CREATE TRIGGER trg_lead_stage_log
-  AFTER INSERT OR UPDATE OF stage_id, outcome_id ON marketing_leads
-  FOR EACH ROW EXECUTE FUNCTION log_lead_stage_change();
+  AFTER INSERT OR UPDATE OF stage_id, outcome_id ON crm.marketing_leads
+  FOR EACH ROW EXECUTE FUNCTION crm.log_lead_stage_change();
 
 -- ===================================================================
 -- ROW LEVEL SECURITY
 -- ===================================================================
 
--- marketing_leads
-ALTER TABLE marketing_leads ENABLE ROW LEVEL SECURITY;
-ALTER TABLE marketing_leads FORCE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS org_isolation_policy    ON marketing_leads;
-DROP POLICY IF EXISTS tenant_isolation_policy ON marketing_leads;
-CREATE POLICY org_isolation_policy ON marketing_leads AS PERMISSIVE FOR ALL TO app_user
+-- crm.marketing_leads
+ALTER TABLE crm.marketing_leads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE crm.marketing_leads FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS org_isolation_policy    ON crm.marketing_leads;
+DROP POLICY IF EXISTS tenant_isolation_policy ON crm.marketing_leads;
+CREATE POLICY org_isolation_policy ON crm.marketing_leads AS PERMISSIVE FOR ALL TO app_user
   USING     (org_id = NULLIF(current_setting('app.current_org_id',true),'')::uuid AND NOT is_deleted)
   WITH CHECK (org_id = NULLIF(current_setting('app.current_org_id',true),'')::uuid AND NOT is_deleted);
-CREATE POLICY tenant_isolation_policy ON marketing_leads AS PERMISSIVE FOR ALL TO tenant_admin
-  USING (org_id IN (SELECT id FROM organizations WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id',true),'')::uuid AND NOT is_deleted) AND NOT is_deleted)
-  WITH CHECK (org_id IN (SELECT id FROM organizations WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id',true),'')::uuid AND NOT is_deleted) AND NOT is_deleted);
+CREATE POLICY tenant_isolation_policy ON crm.marketing_leads AS PERMISSIVE FOR ALL TO tenant_admin
+  USING (org_id IN (SELECT id FROM entity.organizations WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id',true),'')::uuid AND NOT is_deleted) AND NOT is_deleted)
+  WITH CHECK (org_id IN (SELECT id FROM entity.organizations WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id',true),'')::uuid AND NOT is_deleted) AND NOT is_deleted);
 
--- users
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE users FORCE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS org_isolation_policy    ON users;
-DROP POLICY IF EXISTS tenant_isolation_policy ON users;
-CREATE POLICY org_isolation_policy ON users AS PERMISSIVE FOR ALL TO app_user
+-- iam.users
+ALTER TABLE iam.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE iam.users FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS org_isolation_policy    ON iam.users;
+DROP POLICY IF EXISTS tenant_isolation_policy ON iam.users;
+CREATE POLICY org_isolation_policy ON iam.users AS PERMISSIVE FOR ALL TO app_user
   USING     (org_id = NULLIF(current_setting('app.current_org_id',true),'')::uuid AND NOT is_deleted)
   WITH CHECK (org_id = NULLIF(current_setting('app.current_org_id',true),'')::uuid AND NOT is_deleted);
-CREATE POLICY tenant_isolation_policy ON users AS PERMISSIVE FOR ALL TO tenant_admin
-  USING (org_id IN (SELECT id FROM organizations WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id',true),'')::uuid AND NOT is_deleted) AND NOT is_deleted)
-  WITH CHECK (org_id IN (SELECT id FROM organizations WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id',true),'')::uuid AND NOT is_deleted) AND NOT is_deleted);
+CREATE POLICY tenant_isolation_policy ON iam.users AS PERMISSIVE FOR ALL TO tenant_admin
+  USING (org_id IN (SELECT id FROM entity.organizations WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id',true),'')::uuid AND NOT is_deleted) AND NOT is_deleted)
+  WITH CHECK (org_id IN (SELECT id FROM entity.organizations WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id',true),'')::uuid AND NOT is_deleted) AND NOT is_deleted);
 
--- ad_campaigns
-ALTER TABLE ad_campaigns ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ad_campaigns FORCE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS org_isolation_policy    ON ad_campaigns;
-DROP POLICY IF EXISTS tenant_isolation_policy ON ad_campaigns;
-CREATE POLICY org_isolation_policy ON ad_campaigns AS PERMISSIVE FOR ALL TO app_user
+-- marketing.ad_campaigns
+ALTER TABLE marketing.ad_campaigns ENABLE ROW LEVEL SECURITY;
+ALTER TABLE marketing.ad_campaigns FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS org_isolation_policy    ON marketing.ad_campaigns;
+DROP POLICY IF EXISTS tenant_isolation_policy ON marketing.ad_campaigns;
+CREATE POLICY org_isolation_policy ON marketing.ad_campaigns AS PERMISSIVE FOR ALL TO app_user
   USING     (org_id = NULLIF(current_setting('app.current_org_id',true),'')::uuid AND NOT is_deleted)
   WITH CHECK (org_id = NULLIF(current_setting('app.current_org_id',true),'')::uuid AND NOT is_deleted);
-CREATE POLICY tenant_isolation_policy ON ad_campaigns AS PERMISSIVE FOR ALL TO tenant_admin
-  USING (org_id IN (SELECT id FROM organizations WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id',true),'')::uuid AND NOT is_deleted) AND NOT is_deleted)
-  WITH CHECK (org_id IN (SELECT id FROM organizations WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id',true),'')::uuid AND NOT is_deleted) AND NOT is_deleted);
+CREATE POLICY tenant_isolation_policy ON marketing.ad_campaigns AS PERMISSIVE FOR ALL TO tenant_admin
+  USING (org_id IN (SELECT id FROM entity.organizations WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id',true),'')::uuid AND NOT is_deleted) AND NOT is_deleted)
+  WITH CHECK (org_id IN (SELECT id FROM entity.organizations WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id',true),'')::uuid AND NOT is_deleted) AND NOT is_deleted);
 
--- lead_interactions
-ALTER TABLE lead_interactions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE lead_interactions FORCE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS org_isolation_policy    ON lead_interactions;
-DROP POLICY IF EXISTS tenant_isolation_policy ON lead_interactions;
-CREATE POLICY org_isolation_policy ON lead_interactions AS PERMISSIVE FOR ALL TO app_user
+-- crm.lead_interactions
+ALTER TABLE crm.lead_interactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE crm.lead_interactions FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS org_isolation_policy    ON crm.lead_interactions;
+DROP POLICY IF EXISTS tenant_isolation_policy ON crm.lead_interactions;
+CREATE POLICY org_isolation_policy ON crm.lead_interactions AS PERMISSIVE FOR ALL TO app_user
   USING     (org_id = NULLIF(current_setting('app.current_org_id',true),'')::uuid AND NOT is_deleted)
   WITH CHECK (org_id = NULLIF(current_setting('app.current_org_id',true),'')::uuid AND NOT is_deleted);
-CREATE POLICY tenant_isolation_policy ON lead_interactions AS PERMISSIVE FOR ALL TO tenant_admin
-  USING (org_id IN (SELECT id FROM organizations WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id',true),'')::uuid AND NOT is_deleted) AND NOT is_deleted)
-  WITH CHECK (org_id IN (SELECT id FROM organizations WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id',true),'')::uuid AND NOT is_deleted) AND NOT is_deleted);
+CREATE POLICY tenant_isolation_policy ON crm.lead_interactions AS PERMISSIVE FOR ALL TO tenant_admin
+  USING (org_id IN (SELECT id FROM entity.organizations WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id',true),'')::uuid AND NOT is_deleted) AND NOT is_deleted)
+  WITH CHECK (org_id IN (SELECT id FROM entity.organizations WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id',true),'')::uuid AND NOT is_deleted) AND NOT is_deleted);
 
--- lead_follow_ups
-ALTER TABLE lead_follow_ups ENABLE ROW LEVEL SECURITY;
-ALTER TABLE lead_follow_ups FORCE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS org_isolation_policy    ON lead_follow_ups;
-DROP POLICY IF EXISTS tenant_isolation_policy ON lead_follow_ups;
-CREATE POLICY org_isolation_policy ON lead_follow_ups AS PERMISSIVE FOR ALL TO app_user
+-- crm.lead_follow_ups
+ALTER TABLE crm.lead_follow_ups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE crm.lead_follow_ups FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS org_isolation_policy    ON crm.lead_follow_ups;
+DROP POLICY IF EXISTS tenant_isolation_policy ON crm.lead_follow_ups;
+CREATE POLICY org_isolation_policy ON crm.lead_follow_ups AS PERMISSIVE FOR ALL TO app_user
   USING     (org_id = NULLIF(current_setting('app.current_org_id',true),'')::uuid AND NOT is_deleted)
   WITH CHECK (org_id = NULLIF(current_setting('app.current_org_id',true),'')::uuid AND NOT is_deleted);
-CREATE POLICY tenant_isolation_policy ON lead_follow_ups AS PERMISSIVE FOR ALL TO tenant_admin
-  USING (org_id IN (SELECT id FROM organizations WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id',true),'')::uuid AND NOT is_deleted) AND NOT is_deleted)
-  WITH CHECK (org_id IN (SELECT id FROM organizations WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id',true),'')::uuid AND NOT is_deleted) AND NOT is_deleted);
+CREATE POLICY tenant_isolation_policy ON crm.lead_follow_ups AS PERMISSIVE FOR ALL TO tenant_admin
+  USING (org_id IN (SELECT id FROM entity.organizations WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id',true),'')::uuid AND NOT is_deleted) AND NOT is_deleted)
+  WITH CHECK (org_id IN (SELECT id FROM entity.organizations WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id',true),'')::uuid AND NOT is_deleted) AND NOT is_deleted);
 
--- lead_assignment_log
-ALTER TABLE lead_assignment_log ENABLE ROW LEVEL SECURITY;
-ALTER TABLE lead_assignment_log FORCE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS org_isolation_policy    ON lead_assignment_log;
-DROP POLICY IF EXISTS tenant_isolation_policy ON lead_assignment_log;
-CREATE POLICY org_isolation_policy ON lead_assignment_log AS PERMISSIVE FOR ALL TO app_user
+-- crm.lead_assignment_log
+ALTER TABLE crm.lead_assignment_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE crm.lead_assignment_log FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS org_isolation_policy    ON crm.lead_assignment_log;
+DROP POLICY IF EXISTS tenant_isolation_policy ON crm.lead_assignment_log;
+CREATE POLICY org_isolation_policy ON crm.lead_assignment_log AS PERMISSIVE FOR ALL TO app_user
   USING     (org_id = NULLIF(current_setting('app.current_org_id',true),'')::uuid)
   WITH CHECK (org_id = NULLIF(current_setting('app.current_org_id',true),'')::uuid);
-CREATE POLICY tenant_isolation_policy ON lead_assignment_log AS PERMISSIVE FOR ALL TO tenant_admin
-  USING (org_id IN (SELECT id FROM organizations WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id',true),'')::uuid AND NOT is_deleted));
+CREATE POLICY tenant_isolation_policy ON crm.lead_assignment_log AS PERMISSIVE FOR ALL TO tenant_admin
+  USING (org_id IN (SELECT id FROM entity.organizations WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id',true),'')::uuid AND NOT is_deleted));
 
--- lead_status_log (SELECT only for non-service roles)
-ALTER TABLE lead_status_log ENABLE ROW LEVEL SECURITY;
-ALTER TABLE lead_status_log FORCE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS org_isolation_policy    ON lead_status_log;
-DROP POLICY IF EXISTS tenant_isolation_policy ON lead_status_log;
-CREATE POLICY org_isolation_policy ON lead_status_log AS PERMISSIVE FOR SELECT TO app_user
+-- crm.lead_status_log (SELECT only for non-service roles)
+ALTER TABLE crm.lead_status_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE crm.lead_status_log FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS org_isolation_policy    ON crm.lead_status_log;
+DROP POLICY IF EXISTS tenant_isolation_policy ON crm.lead_status_log;
+CREATE POLICY org_isolation_policy ON crm.lead_status_log AS PERMISSIVE FOR SELECT TO app_user
   USING (org_id = NULLIF(current_setting('app.current_org_id',true),'')::uuid);
-CREATE POLICY tenant_isolation_policy ON lead_status_log AS PERMISSIVE FOR SELECT TO tenant_admin
-  USING (org_id IN (SELECT id FROM organizations WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id',true),'')::uuid AND NOT is_deleted));
+CREATE POLICY tenant_isolation_policy ON crm.lead_status_log AS PERMISSIVE FOR SELECT TO tenant_admin
+  USING (org_id IN (SELECT id FROM entity.organizations WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id',true),'')::uuid AND NOT is_deleted));
 
 -- ===================================================================
 -- INDEXES
 -- ===================================================================
 
--- marketing_leads
+-- crm.marketing_leads
 CREATE INDEX IF NOT EXISTS idx_marketing_leads_org_stage_created
-  ON marketing_leads (org_id, stage_id, created_at DESC) WHERE NOT is_deleted;
+  ON crm.marketing_leads (org_id, stage_id, created_at DESC) WHERE NOT is_deleted;
 CREATE INDEX IF NOT EXISTS idx_marketing_leads_org_created
-  ON marketing_leads (org_id, created_at DESC) WHERE NOT is_deleted;
+  ON crm.marketing_leads (org_id, created_at DESC) WHERE NOT is_deleted;
 CREATE INDEX IF NOT EXISTS idx_marketing_leads_org_assigned_user
-  ON marketing_leads (org_id, assigned_user_id, created_at DESC) WHERE NOT is_deleted;
+  ON crm.marketing_leads (org_id, assigned_user_id, created_at DESC) WHERE NOT is_deleted;
 CREATE INDEX IF NOT EXISTS idx_marketing_leads_org_campaign
-  ON marketing_leads (org_id, campaign_id) WHERE campaign_id IS NOT NULL AND NOT is_deleted;
+  ON crm.marketing_leads (org_id, campaign_id) WHERE campaign_id IS NOT NULL AND NOT is_deleted;
 CREATE INDEX IF NOT EXISTS idx_marketing_leads_org_outcome
-  ON marketing_leads (org_id, outcome_id) WHERE outcome_id IS NOT NULL AND NOT is_deleted;
+  ON crm.marketing_leads (org_id, outcome_id) WHERE outcome_id IS NOT NULL AND NOT is_deleted;
 CREATE INDEX IF NOT EXISTS idx_marketing_leads_org_phone
-  ON marketing_leads (org_id, phone) WHERE phone IS NOT NULL AND NOT is_deleted;
+  ON crm.marketing_leads (org_id, phone) WHERE phone IS NOT NULL AND NOT is_deleted;
 CREATE INDEX IF NOT EXISTS idx_marketing_leads_org_email
-  ON marketing_leads (org_id, email) WHERE email IS NOT NULL AND NOT is_deleted;
+  ON crm.marketing_leads (org_id, email) WHERE email IS NOT NULL AND NOT is_deleted;
 CREATE INDEX IF NOT EXISTS idx_marketing_leads_fullname_trgm
-  ON marketing_leads USING GIN (full_name gin_trgm_ops) WHERE NOT is_deleted;
+  ON crm.marketing_leads USING GIN (full_name gin_trgm_ops) WHERE NOT is_deleted;
 CREATE INDEX IF NOT EXISTS idx_marketing_leads_webhook_gin
-  ON marketing_leads USING GIN (raw_webhook_data jsonb_path_ops);
+  ON crm.marketing_leads USING GIN (raw_webhook_data jsonb_path_ops);
 CREATE INDEX IF NOT EXISTS idx_marketing_leads_metadata_gin
-  ON marketing_leads USING GIN (metadata jsonb_path_ops);
+  ON crm.marketing_leads USING GIN (metadata jsonb_path_ops);
 CREATE INDEX IF NOT EXISTS idx_marketing_leads_tags_gin
-  ON marketing_leads USING GIN (tags);
+  ON crm.marketing_leads USING GIN (tags);
 
--- lead_interactions
+-- crm.lead_interactions
 CREATE INDEX IF NOT EXISTS idx_lead_interactions_org_lead_occurred
-  ON lead_interactions (org_id, lead_id, occurred_at DESC) WHERE NOT is_deleted;
+  ON crm.lead_interactions (org_id, lead_id, occurred_at DESC) WHERE NOT is_deleted;
 CREATE INDEX IF NOT EXISTS idx_lead_interactions_lead_id
-  ON lead_interactions (lead_id) WHERE NOT is_deleted;
+  ON crm.lead_interactions (lead_id) WHERE NOT is_deleted;
 CREATE INDEX IF NOT EXISTS idx_lead_interactions_lead_id_full
-  ON lead_interactions (lead_id);
+  ON crm.lead_interactions (lead_id);
 
--- lead_follow_ups
+-- crm.lead_follow_ups
 CREATE INDEX IF NOT EXISTS idx_lead_follow_ups_org_user_scheduled
-  ON lead_follow_ups (org_id, assigned_user_id, scheduled_at ASC, status_id) WHERE NOT is_deleted;
+  ON crm.lead_follow_ups (org_id, assigned_user_id, scheduled_at ASC, status_id) WHERE NOT is_deleted;
 CREATE INDEX IF NOT EXISTS idx_lead_follow_ups_lead_id
-  ON lead_follow_ups (lead_id) WHERE NOT is_deleted;
+  ON crm.lead_follow_ups (lead_id) WHERE NOT is_deleted;
 CREATE INDEX IF NOT EXISTS idx_lead_follow_ups_lead_id_full
-  ON lead_follow_ups (lead_id);
+  ON crm.lead_follow_ups (lead_id);
 
--- lead_assignment_log
+-- crm.lead_assignment_log
 CREATE INDEX IF NOT EXISTS idx_lead_assignment_log_lead
-  ON lead_assignment_log (org_id, lead_id, assigned_at DESC);
+  ON crm.lead_assignment_log (org_id, lead_id, assigned_at DESC);
 CREATE INDEX IF NOT EXISTS idx_lead_assignment_log_assigned_by
-  ON lead_assignment_log (org_id, assigned_by_id, assigned_at DESC);
+  ON crm.lead_assignment_log (org_id, assigned_by_id, assigned_at DESC);
 CREATE INDEX IF NOT EXISTS idx_lead_assignment_log_assigned_to
-  ON lead_assignment_log (org_id, assigned_to_id, assigned_at DESC);
+  ON crm.lead_assignment_log (org_id, assigned_to_id, assigned_at DESC);
 CREATE INDEX IF NOT EXISTS idx_lead_assignment_log_lead_id_full
-  ON lead_assignment_log (lead_id);
+  ON crm.lead_assignment_log (lead_id);
 
--- ad_campaigns
+-- marketing.ad_campaigns
 CREATE INDEX IF NOT EXISTS idx_ad_campaigns_org_platform
-  ON ad_campaigns (org_id, platform_id) WHERE NOT is_deleted;
+  ON marketing.ad_campaigns (org_id, platform_id) WHERE NOT is_deleted;
 
--- organizations
+-- entity.organizations
 CREATE INDEX IF NOT EXISTS idx_organizations_tenant_id
-  ON organizations (tenant_id) WHERE NOT is_deleted;
+  ON entity.organizations (tenant_id) WHERE NOT is_deleted;
 
--- users
+-- iam.users
 CREATE INDEX IF NOT EXISTS idx_users_org_role
-  ON users (org_id, role_id) WHERE NOT is_deleted;
+  ON iam.users (org_id, role_id) WHERE NOT is_deleted;
 CREATE INDEX IF NOT EXISTS idx_users_org_email
-  ON users (org_id, email) WHERE NOT is_deleted;
+  ON iam.users (org_id, email) WHERE NOT is_deleted;
 CREATE INDEX IF NOT EXISTS idx_users_email_trgm
-  ON users USING GIN (email gin_trgm_ops) WHERE NOT is_deleted;
+  ON iam.users USING GIN (email gin_trgm_ops) WHERE NOT is_deleted;
 CREATE INDEX IF NOT EXISTS idx_users_manager_id
-  ON users (org_id, manager_id) WHERE manager_id IS NOT NULL AND NOT is_deleted;
+  ON iam.users (org_id, manager_id) WHERE manager_id IS NOT NULL AND NOT is_deleted;
 
 -- Vector similarity stub — uncomment after pgvector confirmed and embedding column added
 -- CREATE INDEX IF NOT EXISTS idx_marketing_leads_embedding_ivfflat
---   ON marketing_leads USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+--   ON crm.marketing_leads USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 
 -- ===================================================================
 -- GRANTS
@@ -1884,71 +2007,84 @@ CREATE INDEX IF NOT EXISTS idx_users_manager_id
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 REVOKE ALL    ON SCHEMA public FROM PUBLIC;
 GRANT  USAGE  ON SCHEMA public TO PUBLIC;
-GRANT  USAGE  ON SCHEMA public TO app_user;
-GRANT  USAGE  ON SCHEMA public TO tenant_admin;
-GRANT  USAGE  ON SCHEMA public TO crm_service;
+GRANT  USAGE  ON SCHEMA public    TO app_user, tenant_admin, crm_service;
+GRANT  USAGE  ON SCHEMA geo       TO app_user, tenant_admin, crm_service;
+GRANT  USAGE  ON SCHEMA entity    TO app_user, tenant_admin, crm_service;
+GRANT  USAGE  ON SCHEMA iam       TO app_user, tenant_admin, crm_service;
+GRANT  USAGE  ON SCHEMA crm       TO app_user, tenant_admin, crm_service;
+GRANT  USAGE  ON SCHEMA marketing TO app_user, tenant_admin, crm_service;
+GRANT  USAGE  ON SCHEMA audit     TO app_user, tenant_admin, crm_service;
+GRANT  USAGE  ON SCHEMA ext       TO app_user, tenant_admin, crm_service;
 
 DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO crm_service', current_database()); END; $$;
 
 -- app_user: DML on operational tables; SELECT-only on audit + lookups
 GRANT SELECT, INSERT, UPDATE ON TABLE
-  users, ad_campaigns, marketing_leads, lead_interactions, lead_follow_ups TO app_user;
+  iam.users, marketing.ad_campaigns, crm.marketing_leads, crm.lead_interactions, crm.lead_follow_ups TO app_user;
 REVOKE DELETE ON TABLE
-  users, ad_campaigns, marketing_leads, lead_interactions, lead_follow_ups FROM app_user;
+  iam.users, marketing.ad_campaigns, crm.marketing_leads, crm.lead_interactions, crm.lead_follow_ups FROM app_user;
 
 GRANT SELECT ON TABLE
-  user_roles, lead_stage, lead_stage_outcome, interaction_types, follow_up_statuses,
-  marketing_platforms, campaign_statuses, org_types, tenant_domains, tenant_plan_types,
-  lead_sources, branches, organizations,
-  countries, states, cities
+  iam.user_roles, crm.lead_stage, crm.lead_stage_outcome, crm.interaction_types, crm.follow_up_statuses,
+  marketing.marketing_platforms, marketing.campaign_statuses, entity.org_types, entity.tenant_domains, entity.tenant_plan_types,
+  crm.lead_sources, entity.branches, entity.organizations,
+  geo.countries, geo.states, geo.cities
 TO app_user;
 
-GRANT SELECT ON TABLE lead_assignment_log, lead_status_log, marketing_leads_history, audit_log TO app_user;
-REVOKE INSERT, UPDATE, DELETE ON TABLE lead_assignment_log, lead_status_log, marketing_leads_history, audit_log FROM app_user;
+GRANT SELECT ON TABLE crm.lead_assignment_log, crm.lead_status_log, audit.marketing_leads_history, audit.audit_log TO app_user;
+REVOKE INSERT, UPDATE, DELETE ON TABLE crm.lead_assignment_log, crm.lead_status_log, audit.marketing_leads_history, audit.audit_log FROM app_user;
 
 GRANT SELECT ON TABLE
-  vw_dashboard_leads, vw_user_org_chart, vw_user_team_members,
-  vw_lead_followup_timeline, vw_lead_assignment_timeline,
-  vw_sales_follow_up_pipeline, vw_followup_pipeline_enriched,
-  vw_org_performance_snapshot
+  crm.vw_dashboard_leads, iam.vw_user_org_chart, iam.vw_user_team_members,
+  crm.vw_lead_followup_timeline, crm.vw_lead_assignment_timeline,
+  crm.vw_sales_follow_up_pipeline, crm.vw_followup_pipeline_enriched,
+  crm.vw_org_performance_snapshot,
+  iam.vw_user_org_access, entity.vw_branch_lookup, marketing.vw_campaign_lookup, crm.vw_rep_performance
 TO app_user;
 
-GRANT EXECUTE ON FUNCTION can_assign_to(UUID,UUID,UUID) TO app_user;
+GRANT EXECUTE ON FUNCTION iam.can_assign_to(UUID,UUID,UUID) TO app_user;
 
 -- tenant_admin: cross-org DML
 GRANT SELECT, INSERT, UPDATE ON TABLE
-  users, ad_campaigns, marketing_leads, lead_interactions, lead_follow_ups TO tenant_admin;
+  iam.users, marketing.ad_campaigns, crm.marketing_leads, crm.lead_interactions, crm.lead_follow_ups TO tenant_admin;
 REVOKE DELETE ON TABLE
-  users, ad_campaigns, marketing_leads, lead_interactions, lead_follow_ups FROM tenant_admin;
+  iam.users, marketing.ad_campaigns, crm.marketing_leads, crm.lead_interactions, crm.lead_follow_ups FROM tenant_admin;
 
 GRANT SELECT ON TABLE
-  organizations, lead_assignment_log, lead_status_log, marketing_leads_history TO tenant_admin;
-GRANT SELECT ON TABLE audit_log TO tenant_admin;
-REVOKE INSERT, UPDATE, DELETE ON TABLE audit_log FROM tenant_admin;
+  entity.organizations, crm.lead_assignment_log, crm.lead_status_log, audit.marketing_leads_history TO tenant_admin;
+GRANT SELECT ON TABLE audit.audit_log TO tenant_admin;
+REVOKE INSERT, UPDATE, DELETE ON TABLE audit.audit_log FROM tenant_admin;
 GRANT SELECT ON TABLE
-  user_roles, lead_stage, lead_stage_outcome, interaction_types, follow_up_statuses,
-  marketing_platforms, campaign_statuses, org_types, tenant_domains, tenant_plan_types,
-  lead_sources, branches,
-  countries, states, cities
+  iam.user_roles, crm.lead_stage, crm.lead_stage_outcome, crm.interaction_types, crm.follow_up_statuses,
+  marketing.marketing_platforms, marketing.campaign_statuses, entity.org_types, entity.tenant_domains, entity.tenant_plan_types,
+  crm.lead_sources, entity.branches,
+  geo.countries, geo.states, geo.cities
 TO tenant_admin;
 
 GRANT SELECT ON TABLE
-  vw_dashboard_leads, vw_user_org_chart, vw_user_team_members,
-  vw_lead_followup_timeline, vw_lead_assignment_timeline,
-  vw_sales_follow_up_pipeline, vw_followup_pipeline_enriched,
-  vw_tenant_campaign_summary, vw_tenant_full_dashboard,
-  vw_org_performance_snapshot
+  crm.vw_dashboard_leads, iam.vw_user_org_chart, iam.vw_user_team_members,
+  crm.vw_lead_followup_timeline, crm.vw_lead_assignment_timeline,
+  crm.vw_sales_follow_up_pipeline, crm.vw_followup_pipeline_enriched,
+  marketing.vw_tenant_campaign_summary, crm.vw_tenant_full_dashboard,
+  crm.vw_org_performance_snapshot,
+  iam.vw_user_org_access, entity.vw_branch_lookup, marketing.vw_campaign_lookup, crm.vw_rep_performance
 TO tenant_admin;
 
-GRANT EXECUTE ON FUNCTION can_assign_to(UUID,UUID,UUID) TO tenant_admin;
+GRANT EXECUTE ON FUNCTION iam.can_assign_to(UUID,UUID,UUID) TO tenant_admin;
 
--- crm_service: unrestricted
-GRANT ALL PRIVILEGES ON ALL TABLES    IN SCHEMA public TO crm_service;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO crm_service;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON TABLES    TO crm_service;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON SEQUENCES TO crm_service;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO app_user;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO tenant_admin;
+-- crm_service: unrestricted across all schemas
+DO $$
+DECLARE s TEXT;
+BEGIN
+  FOREACH s IN ARRAY ARRAY['public','geo','entity','iam','crm','marketing','audit','ext'] LOOP
+    EXECUTE format('GRANT ALL PRIVILEGES ON ALL TABLES    IN SCHEMA %I TO crm_service', s);
+    EXECUTE format('GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA %I TO crm_service', s);
+    EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I GRANT ALL PRIVILEGES ON TABLES    TO crm_service', s);
+    EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I GRANT ALL PRIVILEGES ON SEQUENCES TO crm_service', s);
+    EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I GRANT SELECT ON TABLES TO app_user', s);
+    EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I GRANT SELECT ON TABLES TO tenant_admin', s);
+  END LOOP;
+END; $$;
 
 -- ===================================================================
 -- SERVICE LOGIN ROLES  (per-microservice credentials)
@@ -2013,14 +2149,24 @@ BEGIN
     CREATE ROLE analytics_svc WITH LOGIN PASSWORD 'replace_in_env' BYPASSRLS NOINHERIT;
   ELSE ALTER ROLE analytics_svc WITH LOGIN BYPASSRLS NOINHERIT; END IF;
 END; $$;
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO analytics_svc;
-REVOKE INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public FROM analytics_svc;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO analytics_svc;
+DO $$
+DECLARE s TEXT;
+BEGIN
+  FOREACH s IN ARRAY ARRAY['public','geo','entity','iam','crm','marketing','audit','ext'] LOOP
+    EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA %I TO analytics_svc', s);
+    EXECUTE format('REVOKE INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I FROM analytics_svc', s);
+    EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I GRANT SELECT ON TABLES TO analytics_svc', s);
+  END LOOP;
+END; $$;
 
--- Schema + connect for all service roles
-GRANT USAGE ON SCHEMA public TO
-  lead_svc, campaign_svc, user_mgmt_svc,
-  notif_svc, intake_svc, tenant_dash_svc, analytics_svc;
+-- Schema USAGE for all service roles
+DO $$
+DECLARE s TEXT;
+BEGIN
+  FOREACH s IN ARRAY ARRAY['public','geo','entity','iam','crm','marketing','audit','ext'] LOOP
+    EXECUTE format('GRANT USAGE ON SCHEMA %I TO lead_svc, campaign_svc, user_mgmt_svc, notif_svc, intake_svc, tenant_dash_svc, analytics_svc, meta_svc', s);
+  END LOOP;
+END; $$;
 
 DO $$
 DECLARE v_db TEXT := current_database();
@@ -2052,59 +2198,59 @@ END; $$;
 
 -- ── USER_ORG_MAPPING ──────────────────────────────────────────────
 -- Source of truth for which orgs a user can access and at what role.
--- Replaces the single org_id + role_id on users for access control.
+-- Replaces the single org_id + role_id on iam.users for access control.
 --
--- users.org_id  remains as the user's PRIMARY / home org (FK integrity
+-- iam.users.org_id  remains as the user's PRIMARY / home org (FK integrity
 --               and fallback when no org is selected).
--- users.role_id remains as the user's DEFAULT role (mirrors the home
+-- iam.users.role_id remains as the user's DEFAULT role (mirrors the home
 --               org row here; kept for backward-compat during transition).
-CREATE TABLE IF NOT EXISTS user_org_mapping (
-  user_id    UUID        NOT NULL REFERENCES users(id)         ON DELETE CASCADE,
-  org_id     UUID        NOT NULL REFERENCES organizations(id)  ON DELETE CASCADE,
-  role_id    UUID        NOT NULL REFERENCES user_roles(id)     ON DELETE RESTRICT,
+CREATE TABLE IF NOT EXISTS iam.user_org_mapping (
+  user_id    UUID        NOT NULL REFERENCES iam.users(id)         ON DELETE CASCADE,
+  org_id     UUID        NOT NULL REFERENCES entity.organizations(id)  ON DELETE CASCADE,
+  role_id    UUID        NOT NULL REFERENCES iam.user_roles(id)     ON DELETE RESTRICT,
   is_active  BOOLEAN     NOT NULL DEFAULT TRUE,
-  granted_by UUID        REFERENCES users(id)                   ON DELETE SET NULL,
+  granted_by UUID        REFERENCES iam.users(id)                   ON DELETE SET NULL,
   granted_at TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP(),
   PRIMARY KEY (user_id, org_id)
 );
 
-DROP TRIGGER IF EXISTS trg_user_org_mapping_updated_at ON user_org_mapping;
+DROP TRIGGER IF EXISTS trg_user_org_mapping_updated_at ON iam.user_org_mapping;
 CREATE TRIGGER trg_user_org_mapping_updated_at
-  BEFORE UPDATE ON user_org_mapping
-  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+  BEFORE UPDATE ON iam.user_org_mapping
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 CREATE INDEX IF NOT EXISTS idx_user_org_mapping_user_active
-  ON user_org_mapping (user_id) WHERE is_active;
+  ON iam.user_org_mapping (user_id) WHERE is_active;
 CREATE INDEX IF NOT EXISTS idx_user_org_mapping_org_active
-  ON user_org_mapping (org_id)  WHERE is_active;
+  ON iam.user_org_mapping (org_id)  WHERE is_active;
 CREATE INDEX IF NOT EXISTS idx_user_org_mapping_role
-  ON user_org_mapping (role_id);
+  ON iam.user_org_mapping (role_id);
 
 -- ── RLS HELPER FUNCTIONS (SECURITY DEFINER) ───────────────────────
--- These bypass RLS on user_org_mapping so they can be used safely
+-- These bypass RLS on iam.user_org_mapping so they can be used safely
 -- inside RLS policies on OTHER tables without recursive infinite loops.
 
-DROP FUNCTION IF EXISTS fn_user_active_orgs(UUID);
-CREATE FUNCTION fn_user_active_orgs(p_user_id UUID)
+DROP FUNCTION IF EXISTS iam.fn_user_active_orgs(UUID);
+CREATE FUNCTION iam.fn_user_active_orgs(p_user_id UUID)
 RETURNS UUID[] LANGUAGE sql STABLE SECURITY DEFINER AS $$
-  SELECT ARRAY(SELECT org_id FROM user_org_mapping WHERE user_id = p_user_id AND is_active)
+  SELECT ARRAY(SELECT org_id FROM iam.user_org_mapping WHERE user_id = p_user_id AND is_active)
 $$;
 
-DROP FUNCTION IF EXISTS fn_org_active_users(UUID);
-CREATE FUNCTION fn_org_active_users(p_org_id UUID)
+DROP FUNCTION IF EXISTS iam.fn_org_active_users(UUID);
+CREATE FUNCTION iam.fn_org_active_users(p_org_id UUID)
 RETURNS UUID[] LANGUAGE sql STABLE SECURITY DEFINER AS $$
-  SELECT ARRAY(SELECT user_id FROM user_org_mapping WHERE org_id = p_org_id AND is_active)
+  SELECT ARRAY(SELECT user_id FROM iam.user_org_mapping WHERE org_id = p_org_id AND is_active)
 $$;
 
 -- Returns role rank of a user in an org (-1 if no active mapping).
-CREATE OR REPLACE FUNCTION fn_user_org_rank(p_user_id UUID, p_org_id UUID)
+CREATE OR REPLACE FUNCTION iam.fn_user_org_rank(p_user_id UUID, p_org_id UUID)
 RETURNS INT LANGUAGE plpgsql STABLE SECURITY DEFINER AS $$
 DECLARE v_rank INT;
 BEGIN
   SELECT ur.rank INTO v_rank
-  FROM user_org_mapping uom
-  JOIN user_roles ur ON ur.id = uom.role_id
+  FROM iam.user_org_mapping uom
+  JOIN iam.user_roles ur ON ur.id = uom.role_id
   WHERE uom.user_id = p_user_id AND uom.org_id = p_org_id AND uom.is_active;
   RETURN COALESCE(v_rank, -1);
 END; $$;
@@ -2112,14 +2258,14 @@ END; $$;
 -- ── AUTO-GRANT TRIGGER 1 ──────────────────────────────────────────
 -- New org added to a tenant → all existing tenant_admins in that
 -- tenant automatically receive a row for the new org.
-CREATE OR REPLACE FUNCTION auto_grant_tenant_admins_on_new_org()
+CREATE OR REPLACE FUNCTION iam.auto_grant_tenant_admins_on_new_org()
 RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
 BEGIN
-  INSERT INTO user_org_mapping (user_id, org_id, role_id, is_active, granted_by)
+  INSERT INTO iam.user_org_mapping (user_id, org_id, role_id, is_active, granted_by)
   SELECT uom.user_id, NEW.id, uom.role_id, TRUE, NULL
-  FROM user_org_mapping uom
-  JOIN organizations    o  ON o.id  = uom.org_id
-  JOIN user_roles       ur ON ur.id = uom.role_id
+  FROM iam.user_org_mapping uom
+  JOIN entity.organizations    o  ON o.id  = uom.org_id
+  JOIN iam.user_roles       ur ON ur.id = uom.role_id
   WHERE o.tenant_id = NEW.tenant_id
     AND ur.name     = 'tenant_admin'
     AND uom.is_active
@@ -2127,31 +2273,31 @@ BEGIN
   RETURN NEW;
 END; $$;
 
-DROP TRIGGER IF EXISTS trg_auto_grant_tenant_admins_on_new_org ON organizations;
+DROP TRIGGER IF EXISTS trg_auto_grant_tenant_admins_on_new_org ON entity.organizations;
 CREATE TRIGGER trg_auto_grant_tenant_admins_on_new_org
-  AFTER INSERT ON organizations
-  FOR EACH ROW EXECUTE FUNCTION auto_grant_tenant_admins_on_new_org();
+  AFTER INSERT ON entity.organizations
+  FOR EACH ROW EXECUTE FUNCTION iam.auto_grant_tenant_admins_on_new_org();
 
 -- ── AUTO-GRANT TRIGGER 2 ──────────────────────────────────────────
 -- User first granted tenant_admin in any org → they automatically
 -- receive rows for all other existing orgs in the same tenant.
 -- pg_trigger_depth() guard prevents recursive re-firing when this
 -- function's own INSERTs trigger the same event.
-CREATE OR REPLACE FUNCTION auto_grant_all_orgs_on_tenant_admin()
+CREATE OR REPLACE FUNCTION iam.auto_grant_all_orgs_on_tenant_admin()
 RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE v_tenant_id UUID;
 BEGIN
   IF pg_trigger_depth() > 1 THEN RETURN NEW; END IF;
 
   IF NOT EXISTS (
-    SELECT 1 FROM user_roles WHERE id = NEW.role_id AND name = 'tenant_admin'
+    SELECT 1 FROM iam.user_roles WHERE id = NEW.role_id AND name = 'tenant_admin'
   ) THEN RETURN NEW; END IF;
 
-  SELECT tenant_id INTO v_tenant_id FROM organizations WHERE id = NEW.org_id;
+  SELECT tenant_id INTO v_tenant_id FROM entity.organizations WHERE id = NEW.org_id;
 
-  INSERT INTO user_org_mapping (user_id, org_id, role_id, is_active, granted_by)
+  INSERT INTO iam.user_org_mapping (user_id, org_id, role_id, is_active, granted_by)
   SELECT NEW.user_id, o.id, NEW.role_id, TRUE, NEW.granted_by
-  FROM organizations o
+  FROM entity.organizations o
   WHERE o.tenant_id = v_tenant_id
     AND o.id       <> NEW.org_id
     AND NOT o.is_deleted
@@ -2160,20 +2306,20 @@ BEGIN
   RETURN NEW;
 END; $$;
 
-DROP TRIGGER IF EXISTS trg_auto_grant_all_orgs_on_tenant_admin ON user_org_mapping;
+DROP TRIGGER IF EXISTS trg_auto_grant_all_orgs_on_tenant_admin ON iam.user_org_mapping;
 CREATE TRIGGER trg_auto_grant_all_orgs_on_tenant_admin
-  AFTER INSERT ON user_org_mapping
-  FOR EACH ROW EXECUTE FUNCTION auto_grant_all_orgs_on_tenant_admin();
+  AFTER INSERT ON iam.user_org_mapping
+  FOR EACH ROW EXECUTE FUNCTION iam.auto_grant_all_orgs_on_tenant_admin();
 
 -- ── UPDATED FK SCOPE CHECKS ───────────────────────────────────────
--- Now validate via user_org_mapping so multi-org users (whose home
+-- Now validate via iam.user_org_mapping so multi-org iam.users (whose home
 -- org_id differs from the working org) are not incorrectly rejected.
 
-CREATE OR REPLACE FUNCTION check_lead_fk_org_scope()
+CREATE OR REPLACE FUNCTION crm.check_lead_fk_org_scope()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
   IF NEW.campaign_id IS NOT NULL THEN
-    PERFORM 1 FROM ad_campaigns
+    PERFORM 1 FROM marketing.ad_campaigns
     WHERE id = NEW.campaign_id AND org_id = NEW.org_id AND NOT is_deleted;
     IF NOT FOUND THEN
       RAISE EXCEPTION 'campaign_id % does not belong to org % or has been deleted.',
@@ -2182,8 +2328,8 @@ BEGIN
   END IF;
   IF NEW.assigned_user_id IS NOT NULL THEN
     PERFORM 1
-    FROM user_org_mapping uom
-    JOIN users u ON u.id = uom.user_id
+    FROM iam.user_org_mapping uom
+    JOIN iam.users u ON u.id = uom.user_id
     WHERE uom.user_id = NEW.assigned_user_id
       AND uom.org_id  = NEW.org_id
       AND uom.is_active
@@ -2196,18 +2342,18 @@ BEGIN
   RETURN NEW;
 END; $$;
 
-CREATE OR REPLACE FUNCTION check_interaction_fk_org_scope()
+CREATE OR REPLACE FUNCTION crm.check_interaction_fk_org_scope()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
-  PERFORM 1 FROM marketing_leads
+  PERFORM 1 FROM crm.marketing_leads
   WHERE id = NEW.lead_id AND org_id = NEW.org_id AND NOT is_deleted;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'lead_id % does not belong to org % or has been deleted.',
       NEW.lead_id, NEW.org_id;
   END IF;
   PERFORM 1
-  FROM user_org_mapping uom
-  JOIN users u ON u.id = uom.user_id
+  FROM iam.user_org_mapping uom
+  JOIN iam.users u ON u.id = uom.user_id
   WHERE uom.user_id = NEW.user_id
     AND uom.org_id  = NEW.org_id
     AND uom.is_active
@@ -2219,18 +2365,18 @@ BEGIN
   RETURN NEW;
 END; $$;
 
-CREATE OR REPLACE FUNCTION check_follow_up_fk_org_scope()
+CREATE OR REPLACE FUNCTION crm.check_follow_up_fk_org_scope()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
-  PERFORM 1 FROM marketing_leads
+  PERFORM 1 FROM crm.marketing_leads
   WHERE id = NEW.lead_id AND org_id = NEW.org_id AND NOT is_deleted;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'lead_id % does not belong to org % or has been deleted.',
       NEW.lead_id, NEW.org_id;
   END IF;
   PERFORM 1
-  FROM user_org_mapping uom
-  JOIN users u ON u.id = uom.user_id
+  FROM iam.user_org_mapping uom
+  JOIN iam.users u ON u.id = uom.user_id
   WHERE uom.user_id = NEW.assigned_user_id
     AND uom.org_id  = NEW.org_id
     AND uom.is_active
@@ -2242,10 +2388,10 @@ BEGIN
   RETURN NEW;
 END; $$;
 
--- ── UPDATED can_assign_to ─────────────────────────────────────────
--- Looks up role via user_org_mapping instead of users.org_id so that
--- multi-org users are evaluated for the org they are currently working in.
-CREATE OR REPLACE FUNCTION can_assign_to(
+-- ── UPDATED iam.can_assign_to ─────────────────────────────────────────
+-- Looks up role via iam.user_org_mapping instead of iam.users.org_id so that
+-- multi-org iam.users are evaluated for the org they are currently working in.
+CREATE OR REPLACE FUNCTION iam.can_assign_to(
   p_org_id         UUID,
   p_acting_user_id UUID,
   p_target_user_id UUID
@@ -2257,9 +2403,9 @@ BEGIN
   IF p_acting_user_id = p_target_user_id THEN RETURN TRUE; END IF;
 
   SELECT ur.name INTO v_role
-  FROM user_org_mapping uom
-  JOIN user_roles ur ON ur.id = uom.role_id
-  JOIN users      u  ON u.id  = uom.user_id
+  FROM iam.user_org_mapping uom
+  JOIN iam.user_roles ur ON ur.id = uom.role_id
+  JOIN iam.users      u  ON u.id  = uom.user_id
   WHERE uom.user_id = p_acting_user_id
     AND uom.org_id  = p_org_id
     AND uom.is_active
@@ -2270,7 +2416,7 @@ BEGIN
 
   IF v_role IN ('org_manager','org_sr_manager','senior_sales_executive') THEN
     SELECT COUNT(*) > 0 INTO v_in_scope
-    FROM vw_user_team_members
+    FROM iam.vw_user_team_members
     WHERE manager_id = p_acting_user_id
       AND member_id  = p_target_user_id
       AND org_id     = p_org_id;
@@ -2280,25 +2426,25 @@ BEGIN
   RETURN FALSE;
 END; $$;
 
--- ── RLS: organizations ────────────────────────────────────────────
+-- ── RLS: entity.organizations ────────────────────────────────────────────
 -- Previously had no RLS — anyone with app_user could read all orgs.
 -- Now: app_user sees only orgs they are mapped to; tenant_admin sees
 -- all orgs within their tenant.
-ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE organizations FORCE ROW LEVEL SECURITY;
+ALTER TABLE entity.organizations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE entity.organizations FORCE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS org_isolation_policy    ON organizations;
-DROP POLICY IF EXISTS tenant_isolation_policy ON organizations;
+DROP POLICY IF EXISTS org_isolation_policy    ON entity.organizations;
+DROP POLICY IF EXISTS tenant_isolation_policy ON entity.organizations;
 
-CREATE POLICY org_isolation_policy ON organizations AS PERMISSIVE FOR SELECT TO app_user
+CREATE POLICY org_isolation_policy ON entity.organizations AS PERMISSIVE FOR SELECT TO app_user
   USING (
     NOT is_deleted AND
-    id = ANY(fn_user_active_orgs(
+    id = ANY(iam.fn_user_active_orgs(
       NULLIF(current_setting('app.current_user_id', true), '')::uuid
     ))
   );
 
-CREATE POLICY tenant_isolation_policy ON organizations AS PERMISSIVE FOR ALL TO tenant_admin
+CREATE POLICY tenant_isolation_policy ON entity.organizations AS PERMISSIVE FOR ALL TO tenant_admin
   USING (
     tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
     AND NOT is_deleted
@@ -2308,33 +2454,33 @@ CREATE POLICY tenant_isolation_policy ON organizations AS PERMISSIVE FOR ALL TO 
     AND NOT is_deleted
   );
 
--- ── RLS: users — update SELECT to use user_org_mapping ────────────
--- Old policy: org_id = current_org_id (breaks for multi-org users
+-- ── RLS: iam.users — update SELECT to use iam.user_org_mapping ────────────
+-- Old policy: org_id = current_org_id (breaks for multi-org iam.users
 -- whose home org differs from the org they're currently working in).
--- New SELECT policy: see all users who have an active mapping to the
+-- New SELECT policy: see all iam.users who have an active mapping to the
 -- current org (regardless of their home org_id).
 -- Write policies remain anchored to org_id for home-org assignment.
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE users FORCE ROW LEVEL SECURITY;
+ALTER TABLE iam.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE iam.users FORCE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS org_isolation_policy    ON users;
-DROP POLICY IF EXISTS tenant_isolation_policy ON users;
+DROP POLICY IF EXISTS org_isolation_policy    ON iam.users;
+DROP POLICY IF EXISTS tenant_isolation_policy ON iam.users;
 
-CREATE POLICY users_org_select ON users AS PERMISSIVE FOR SELECT TO app_user
+CREATE POLICY users_org_select ON iam.users AS PERMISSIVE FOR SELECT TO app_user
   USING (
     NOT is_deleted AND
-    id = ANY(fn_org_active_users(
+    id = ANY(iam.fn_org_active_users(
       NULLIF(current_setting('app.current_org_id', true), '')::uuid
     ))
   );
 
-CREATE POLICY users_org_write ON users AS PERMISSIVE FOR INSERT TO app_user
+CREATE POLICY users_org_write ON iam.users AS PERMISSIVE FOR INSERT TO app_user
   WITH CHECK (
     org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid
     AND NOT is_deleted
   );
 
-CREATE POLICY users_org_update ON users AS PERMISSIVE FOR UPDATE TO app_user
+CREATE POLICY users_org_update ON iam.users AS PERMISSIVE FOR UPDATE TO app_user
   USING (
     org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid
     AND NOT is_deleted
@@ -2344,85 +2490,429 @@ CREATE POLICY users_org_update ON users AS PERMISSIVE FOR UPDATE TO app_user
     AND NOT is_deleted
   );
 
-CREATE POLICY users_tenant_isolation ON users AS PERMISSIVE FOR ALL TO tenant_admin
+CREATE POLICY users_tenant_isolation ON iam.users AS PERMISSIVE FOR ALL TO tenant_admin
   USING (
     org_id IN (
-      SELECT id FROM organizations
+      SELECT id FROM entity.organizations
       WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
         AND NOT is_deleted
     ) AND NOT is_deleted
   )
   WITH CHECK (
     org_id IN (
-      SELECT id FROM organizations
+      SELECT id FROM entity.organizations
       WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
         AND NOT is_deleted
     ) AND NOT is_deleted
   );
 
--- ── RLS: user_org_mapping ─────────────────────────────────────────
+-- ── RLS: iam.user_org_mapping ─────────────────────────────────────────
 -- Policies use SECURITY DEFINER helpers to avoid recursive RLS
--- (a policy querying user_org_mapping would trigger its own RLS).
-ALTER TABLE user_org_mapping ENABLE ROW LEVEL SECURITY;
-ALTER TABLE user_org_mapping FORCE ROW LEVEL SECURITY;
+-- (a policy querying iam.user_org_mapping would trigger its own RLS).
+ALTER TABLE iam.user_org_mapping ENABLE ROW LEVEL SECURITY;
+ALTER TABLE iam.user_org_mapping FORCE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS self_read_policy        ON user_org_mapping;
-DROP POLICY IF EXISTS org_admin_manage_policy ON user_org_mapping;
-DROP POLICY IF EXISTS tenant_isolation_policy ON user_org_mapping;
+DROP POLICY IF EXISTS self_read_policy        ON iam.user_org_mapping;
+DROP POLICY IF EXISTS org_admin_manage_policy ON iam.user_org_mapping;
+DROP POLICY IF EXISTS tenant_isolation_policy ON iam.user_org_mapping;
 
 -- Any user can read their own mapping rows.
-CREATE POLICY self_read_policy ON user_org_mapping AS PERMISSIVE FOR SELECT TO app_user
+CREATE POLICY self_read_policy ON iam.user_org_mapping AS PERMISSIVE FOR SELECT TO app_user
   USING (
     user_id = NULLIF(current_setting('app.current_user_id', true), '')::uuid
   );
 
 -- Org admins (rank >= 80) can manage mappings within their current org.
--- fn_user_org_rank is SECURITY DEFINER so it bypasses RLS on this table.
-CREATE POLICY org_admin_manage_policy ON user_org_mapping AS PERMISSIVE FOR ALL TO app_user
+-- iam.fn_user_org_rank is SECURITY DEFINER so it bypasses RLS on this table.
+CREATE POLICY org_admin_manage_policy ON iam.user_org_mapping AS PERMISSIVE FOR ALL TO app_user
   USING (
     org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid
-    AND fn_user_org_rank(
+    AND iam.fn_user_org_rank(
       NULLIF(current_setting('app.current_user_id', true), '')::uuid,
       NULLIF(current_setting('app.current_org_id',  true), '')::uuid
     ) >= 80
   )
   WITH CHECK (
     org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid
-    AND fn_user_org_rank(
+    AND iam.fn_user_org_rank(
       NULLIF(current_setting('app.current_user_id', true), '')::uuid,
       NULLIF(current_setting('app.current_org_id',  true), '')::uuid
     ) >= 80
   );
 
 -- tenant_admin can manage all mappings across their tenant's orgs.
-CREATE POLICY tenant_isolation_policy ON user_org_mapping AS PERMISSIVE FOR ALL TO tenant_admin
+CREATE POLICY tenant_isolation_policy ON iam.user_org_mapping AS PERMISSIVE FOR ALL TO tenant_admin
   USING (
     org_id IN (
-      SELECT id FROM organizations
+      SELECT id FROM entity.organizations
       WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
         AND NOT is_deleted
     )
   )
   WITH CHECK (
     org_id IN (
-      SELECT id FROM organizations
+      SELECT id FROM entity.organizations
       WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
         AND NOT is_deleted
     )
   );
 
--- ── GRANTS: user_org_mapping ──────────────────────────────────────
-GRANT SELECT, INSERT, UPDATE ON TABLE user_org_mapping TO app_user;
-REVOKE DELETE ON TABLE user_org_mapping FROM app_user;
+-- ── GRANTS: iam.user_org_mapping ──────────────────────────────────────
+GRANT SELECT, INSERT, UPDATE ON TABLE iam.user_org_mapping TO app_user;
+REVOKE DELETE ON TABLE iam.user_org_mapping FROM app_user;
 
-GRANT SELECT, INSERT, UPDATE ON TABLE user_org_mapping TO tenant_admin;
-REVOKE DELETE ON TABLE user_org_mapping FROM tenant_admin;
+GRANT SELECT, INSERT, UPDATE ON TABLE iam.user_org_mapping TO tenant_admin;
+REVOKE DELETE ON TABLE iam.user_org_mapping FROM tenant_admin;
 
-GRANT ALL PRIVILEGES ON TABLE user_org_mapping TO crm_service;
+GRANT ALL PRIVILEGES ON TABLE iam.user_org_mapping TO crm_service;
 
--- tenant_admin can also INSERT/UPDATE organizations (create new branches/orgs)
-GRANT INSERT, UPDATE ON TABLE organizations TO tenant_admin;
+-- tenant_admin can also manage entity.organizations and entity.branches
+GRANT INSERT, UPDATE ON TABLE entity.organizations TO tenant_admin;
+GRANT INSERT, UPDATE ON TABLE entity.branches TO tenant_admin;
 
-GRANT EXECUTE ON FUNCTION fn_user_active_orgs(UUID)  TO app_user, tenant_admin;
-GRANT EXECUTE ON FUNCTION fn_org_active_users(UUID)  TO app_user, tenant_admin;
-GRANT EXECUTE ON FUNCTION fn_user_org_rank(UUID,UUID) TO app_user, tenant_admin;
+-- app_user can INSERT entity.branches (org admins create entity.branches within their org)
+GRANT INSERT, UPDATE ON TABLE entity.branches TO app_user;
+
+GRANT EXECUTE ON FUNCTION iam.fn_user_active_orgs(UUID)  TO app_user, tenant_admin;
+GRANT EXECUTE ON FUNCTION iam.fn_org_active_users(UUID)  TO app_user, tenant_admin;
+GRANT EXECUTE ON FUNCTION iam.fn_user_org_rank(UUID,UUID) TO app_user, tenant_admin;
+
+-- ===================================================================
+-- SECURITY HARDENING BLOCK
+-- (Issues: #4 JWT blocklist, #15 audit.activities RLS, #19 view
+--  security_invoker, #28 iam.user_org_mapping policy split, #32 audit.audit_log)
+-- ===================================================================
+
+-- ── TOKEN BLOCKLIST (issue #4: DB-backed JWT revocation) ──────────
+-- Supports revocation at JTI (logout), user, org, and tenant level.
+CREATE TABLE IF NOT EXISTS iam.token_blocklist (
+  id          UUID        PRIMARY KEY DEFAULT public.gen_uuidv7(),
+  jti         TEXT,
+  user_id     UUID        REFERENCES iam.users(id)         ON DELETE CASCADE,
+  org_id      UUID        REFERENCES entity.organizations(id) ON DELETE CASCADE,
+  tenant_id   UUID,
+  revoked_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  revoked_by  UUID        REFERENCES iam.users(id)         ON DELETE SET NULL,
+  reason      TEXT,
+  expires_at  TIMESTAMPTZ NOT NULL,
+  CONSTRAINT chk_blocklist_has_scope CHECK (
+    jti IS NOT NULL OR user_id IS NOT NULL OR org_id IS NOT NULL OR tenant_id IS NOT NULL
+  )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_token_blocklist_jti
+  ON iam.token_blocklist (jti) WHERE jti IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_token_blocklist_user
+  ON iam.token_blocklist (user_id, revoked_at) WHERE user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_token_blocklist_org
+  ON iam.token_blocklist (org_id, revoked_at) WHERE org_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_token_blocklist_tenant
+  ON iam.token_blocklist (tenant_id, revoked_at) WHERE tenant_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_token_blocklist_expires
+  ON iam.token_blocklist (expires_at);
+
+-- Cleanup job: delete entries whose tokens have already expired
+CREATE OR REPLACE FUNCTION iam.purge_expired_token_blocklist() RETURNS void
+LANGUAGE sql SECURITY DEFINER AS $$
+  DELETE FROM iam.token_blocklist WHERE expires_at < NOW();
+$$;
+
+GRANT ALL ON TABLE iam.token_blocklist TO crm_service;
+REVOKE ALL  ON TABLE iam.token_blocklist FROM app_user, tenant_admin;
+
+-- ── ACTIVITIES RLS (issue #15) ────────────────────────────────────
+ALTER TABLE audit.activities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit.activities FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS org_isolation_policy    ON audit.activities;
+DROP POLICY IF EXISTS tenant_isolation_policy ON audit.activities;
+
+CREATE POLICY org_isolation_policy ON audit.activities AS PERMISSIVE FOR SELECT TO app_user
+  USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
+
+CREATE POLICY tenant_isolation_policy ON audit.activities AS PERMISSIVE FOR SELECT TO tenant_admin
+  USING (
+    org_id IN (
+      SELECT id FROM entity.organizations
+      WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+        AND NOT is_deleted
+    )
+  );
+
+REVOKE INSERT, UPDATE, DELETE ON TABLE audit.activities FROM app_user, tenant_admin;
+GRANT SELECT ON TABLE audit.activities TO app_user;
+GRANT SELECT ON TABLE audit.activities TO tenant_admin;
+GRANT ALL    ON TABLE audit.activities TO crm_service;
+
+-- ── VIEW SECURITY_INVOKER (issue #19) ─────────────────────────────
+-- These views were missing WITH (security_invoker = true), which
+-- means queries ran as the view owner, bypassing the caller's RLS.
+ALTER VIEW iam.vw_user_org_chart          SET (security_invoker = true);
+ALTER VIEW iam.vw_user_team_members       SET (security_invoker = true);
+ALTER VIEW crm.vw_lead_assignment_timeline SET (security_invoker = true);
+
+-- ── USER_ORG_MAPPING: split PERMISSIVE FOR ALL policy (issue #28) ─
+-- The previous org_admin_manage_policy was FOR ALL (SELECT + DML),
+-- which stacks additively (OR) with self_read_policy for SELECT.
+-- Split into explicit per-operation policies to prevent ambiguity.
+DROP POLICY IF EXISTS org_admin_manage_policy ON iam.user_org_mapping;
+
+CREATE POLICY org_admin_read_policy ON iam.user_org_mapping AS PERMISSIVE FOR SELECT TO app_user
+  USING (
+    org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid
+    AND iam.fn_user_org_rank(
+      NULLIF(current_setting('app.current_user_id', true), '')::uuid,
+      NULLIF(current_setting('app.current_org_id',  true), '')::uuid
+    ) >= 80
+  );
+
+CREATE POLICY org_admin_insert_policy ON iam.user_org_mapping AS PERMISSIVE FOR INSERT TO app_user
+  WITH CHECK (
+    org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid
+    AND iam.fn_user_org_rank(
+      NULLIF(current_setting('app.current_user_id', true), '')::uuid,
+      NULLIF(current_setting('app.current_org_id',  true), '')::uuid
+    ) >= 80
+  );
+
+CREATE POLICY org_admin_update_policy ON iam.user_org_mapping AS PERMISSIVE FOR UPDATE TO app_user
+  USING (
+    org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid
+    AND iam.fn_user_org_rank(
+      NULLIF(current_setting('app.current_user_id', true), '')::uuid,
+      NULLIF(current_setting('app.current_org_id',  true), '')::uuid
+    ) >= 80
+  )
+  WITH CHECK (
+    org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid
+    AND iam.fn_user_org_rank(
+      NULLIF(current_setting('app.current_user_id', true), '')::uuid,
+      NULLIF(current_setting('app.current_org_id',  true), '')::uuid
+    ) >= 80
+  );
+
+-- ── AUDIT_LOG: remove duplicate alias columns (issue #32) ─────────
+-- row_id and actor_id are exact aliases of record_id and changed_by.
+-- Drop them and update the trigger to only use the canonical names.
+ALTER TABLE audit.audit_log
+  DROP COLUMN IF EXISTS row_id,
+  DROP COLUMN IF EXISTS actor_id;
+
+-- Update the audit trigger function to stop writing the dropped columns.
+CREATE OR REPLACE FUNCTION audit.audit_row_changes() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_old_json  JSONB;
+  v_diff      JSONB := '{}';
+  v_key       TEXT;
+  v_old_val   JSONB;
+  v_new_val   JSONB;
+  v_record_id UUID;
+  v_org_id    UUID;
+  v_changed_by UUID;
+BEGIN
+  v_changed_by := NULLIF(current_setting('app.current_user_id', true), '')::uuid;
+
+  IF TG_OP = 'UPDATE' THEN
+    v_old_json := to_jsonb(OLD);
+    FOR v_key IN SELECT key FROM jsonb_each(to_jsonb(NEW)) LOOP
+      v_old_val := v_old_json -> v_key;
+      v_new_val := to_jsonb(NEW) -> v_key;
+      IF v_new_val IS DISTINCT FROM v_old_val THEN
+        v_diff := v_diff || jsonb_build_object(v_key, jsonb_build_object('old', v_old_val, 'new', v_new_val));
+      END IF;
+    END LOOP;
+    IF v_diff = '{}'::jsonb THEN RETURN NEW; END IF;
+    v_record_id := (to_jsonb(NEW) ->> 'id')::uuid;
+    v_org_id    := NULLIF(to_jsonb(NEW) ->> 'org_id', '')::uuid;
+    INSERT INTO audit.audit_log (table_name, operation, record_id, org_id, changed_by, changed_fields, old_data, new_data)
+    VALUES (TG_TABLE_NAME, 'U', v_record_id, v_org_id, v_changed_by, v_diff, v_old_json, to_jsonb(NEW));
+    RETURN NEW;
+  ELSIF TG_OP = 'DELETE' THEN
+    v_old_json  := to_jsonb(OLD);
+    v_record_id := (v_old_json ->> 'id')::uuid;
+    v_org_id    := NULLIF(v_old_json ->> 'org_id', '')::uuid;
+    INSERT INTO audit.audit_log (table_name, operation, record_id, org_id, changed_by, changed_fields, old_data)
+    VALUES (TG_TABLE_NAME, 'D', v_record_id, v_org_id, v_changed_by, v_old_json, v_old_json);
+    RETURN OLD;
+  END IF;
+  RETURN NULL;
+END; $$;
+
+-- Prevent duplicate active leads per org on phone and email.
+-- Partial indexes: only enforced when the field is non-NULL and the lead is not soft-deleted.
+CREATE UNIQUE INDEX IF NOT EXISTS uix_marketing_leads_org_phone
+  ON crm.marketing_leads (org_id, phone)
+  WHERE phone IS NOT NULL AND NOT is_deleted;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uix_marketing_leads_org_email
+  ON crm.marketing_leads (org_id, email)
+  WHERE email IS NOT NULL AND NOT is_deleted;
+
+-- ===================================================================
+-- META CONVERSION API — Tables for bidirectional Meta Lead Ads integration
+-- Inbound:  Meta webhook → crm.marketing_leads + ext.meta_leads
+-- Outbound: CRM stage changes → Meta CAPI conversion events
+-- ===================================================================
+
+INSERT INTO public.schema_versions (version, description) VALUES
+  ('1.2.0', 'Meta Conversion API: ext.meta_org_config, ext.meta_leads, ext.meta_lead_custom_fields, ext.meta_capi_outbound_logs')
+ON CONFLICT (version) DO NOTHING;
+
+-- ── META_ORG_INTEGRATIONS: per-org Meta credentials + CAPI config ─
+CREATE TABLE IF NOT EXISTS ext.meta_org_config (
+  id                 UUID        PRIMARY KEY DEFAULT public.gen_uuidv7(),
+  org_id             UUID        NOT NULL REFERENCES entity.organizations(id),
+  app_secret         TEXT        NOT NULL,
+  verify_token       TEXT        NOT NULL,
+  pixel_id           TEXT        NOT NULL,
+  access_token       TEXT        NOT NULL,
+  graph_api_version  TEXT        NOT NULL DEFAULT 'v21.0',
+  is_active          BOOLEAN     NOT NULL DEFAULT true,
+  capi_trigger_stages UUID[]     NOT NULL DEFAULT '{}',
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT uq_meta_org_config_org UNIQUE (org_id)
+);
+
+ALTER TABLE ext.meta_org_config ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY org_isolation_policy ON ext.meta_org_config
+  FOR ALL TO app_user
+  USING  (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid)
+  WITH CHECK (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
+
+-- ── META_LEADS: raw Meta lead data linked to crm.marketing_leads ──────
+CREATE TABLE IF NOT EXISTS ext.meta_leads (
+  id                 UUID        PRIMARY KEY DEFAULT public.gen_uuidv7(),
+  org_id             UUID        NOT NULL REFERENCES entity.organizations(id),
+  marketing_lead_id  UUID        REFERENCES crm.marketing_leads(id) ON DELETE SET NULL,
+  meta_lead_id       BIGINT      NOT NULL,
+  form_id            BIGINT      NOT NULL,
+  campaign_id        BIGINT,
+  adset_id           BIGINT,
+  ad_id              BIGINT,
+  platform           TEXT        CHECK (platform IN ('fb', 'ig')),
+  lead_created_at    TIMESTAMPTZ NOT NULL,
+  full_name          TEXT,
+  first_name         TEXT,
+  last_name          TEXT,
+  email              TEXT,
+  phone              TEXT,
+  whatsapp_number    TEXT,
+  raw_field_data     JSONB,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT uq_meta_leads_meta_lead_id UNIQUE (meta_lead_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_meta_leads_org          ON ext.meta_leads (org_id);
+CREATE INDEX IF NOT EXISTS idx_meta_leads_form         ON ext.meta_leads (form_id);
+CREATE INDEX IF NOT EXISTS idx_meta_leads_campaign     ON ext.meta_leads (campaign_id) WHERE campaign_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_meta_leads_mktg_lead    ON ext.meta_leads (marketing_lead_id) WHERE marketing_lead_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_meta_leads_created      ON ext.meta_leads (created_at DESC);
+
+ALTER TABLE ext.meta_leads ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY org_isolation_policy ON ext.meta_leads
+  FOR ALL TO app_user
+  USING  (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid)
+  WITH CHECK (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
+
+-- ── META_LEAD_CUSTOM_FIELDS: unmapped form fields (1:many) ────────
+CREATE TABLE IF NOT EXISTS ext.meta_lead_custom_fields (
+  id                 UUID        PRIMARY KEY DEFAULT public.gen_uuidv7(),
+  meta_lead_id       UUID        NOT NULL REFERENCES ext.meta_leads(id) ON DELETE CASCADE,
+  org_id             UUID        NOT NULL REFERENCES entity.organizations(id),
+  question_key       TEXT        NOT NULL,
+  question_value     TEXT,
+  CONSTRAINT uq_meta_custom_field UNIQUE (meta_lead_id, question_key)
+);
+
+ALTER TABLE ext.meta_lead_custom_fields ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY org_isolation_policy ON ext.meta_lead_custom_fields
+  FOR ALL TO app_user
+  USING  (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid)
+  WITH CHECK (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
+
+-- ── META_CAPI_OUTBOUND_LOGS: CAPI event audit trail ──────────────
+CREATE TABLE IF NOT EXISTS ext.meta_capi_outbound_logs (
+  id                   UUID        PRIMARY KEY DEFAULT public.gen_uuidv7(),
+  org_id               UUID        NOT NULL REFERENCES entity.organizations(id),
+  marketing_lead_id    UUID        NOT NULL REFERENCES crm.marketing_leads(id),
+  meta_lead_id         UUID        REFERENCES ext.meta_leads(id) ON DELETE SET NULL,
+  event_name           TEXT        NOT NULL,
+  event_id             TEXT        NOT NULL,
+  delivery_status      TEXT        NOT NULL CHECK (delivery_status IN ('SUCCESS', 'FAILED', 'PENDING')),
+  fb_trace_id          TEXT,
+  request_payload      JSONB       NOT NULL,
+  response_payload     JSONB,
+  triggered_by         TEXT        NOT NULL CHECK (triggered_by IN ('auto_stage_change', 'manual')),
+  triggered_by_user_id UUID,
+  sent_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_capi_logs_org           ON ext.meta_capi_outbound_logs (org_id);
+CREATE INDEX IF NOT EXISTS idx_capi_logs_lead          ON ext.meta_capi_outbound_logs (marketing_lead_id);
+CREATE INDEX IF NOT EXISTS idx_capi_logs_sent          ON ext.meta_capi_outbound_logs (sent_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uix_capi_logs_lead_event_success
+  ON ext.meta_capi_outbound_logs (marketing_lead_id, event_name)
+  WHERE delivery_status = 'SUCCESS';
+
+ALTER TABLE ext.meta_capi_outbound_logs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY org_isolation_policy ON ext.meta_capi_outbound_logs
+  FOR ALL TO app_user
+  USING  (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid)
+  WITH CHECK (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
+
+-- ── VIEW: complete meta leads joined to crm.marketing_leads ───────────
+CREATE OR REPLACE VIEW ext.view_meta_leads_complete
+  WITH (security_invoker = true)
+AS
+  SELECT ml.id, ml.org_id, ml.marketing_lead_id, ml.meta_lead_id,
+         ml.form_id, ml.campaign_id AS meta_campaign_id,
+         ml.adset_id, ml.ad_id, ml.platform,
+         ml.lead_created_at AS meta_created_at,
+         ml.full_name AS meta_full_name, ml.email AS meta_email,
+         ml.phone AS meta_phone, ml.whatsapp_number,
+         ml.raw_field_data,
+         mk.first_name, mk.last_name, mk.phone AS crm_phone, mk.email AS crm_email,
+         mk.stage_id, mk.outcome_id, mk.assigned_user_id, mk.campaign_id AS crm_campaign_id,
+         mk.created_at AS crm_created_at
+  FROM ext.meta_leads ml
+  LEFT JOIN crm.marketing_leads mk ON ml.marketing_lead_id = mk.id;
+
+-- ── Grants for Meta tables ────────────────────────────────────────
+GRANT SELECT, INSERT, UPDATE ON ext.meta_org_config    TO app_user;
+GRANT SELECT, INSERT, UPDATE ON ext.meta_leads               TO app_user;
+GRANT SELECT, INSERT         ON ext.meta_lead_custom_fields   TO app_user;
+GRANT SELECT, INSERT         ON ext.meta_capi_outbound_logs   TO app_user;
+GRANT SELECT                 ON ext.view_meta_leads_complete   TO app_user;
+
+GRANT ALL PRIVILEGES ON ext.meta_org_config    TO crm_service;
+GRANT ALL PRIVILEGES ON ext.meta_leads               TO crm_service;
+GRANT ALL PRIVILEGES ON ext.meta_lead_custom_fields  TO crm_service;
+GRANT ALL PRIVILEGES ON ext.meta_capi_outbound_logs  TO crm_service;
+GRANT SELECT         ON ext.view_meta_leads_complete  TO crm_service;
+
+-- ── meta_svc login role ───────────────────────────────────────────
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meta_svc') THEN
+    CREATE ROLE meta_svc WITH LOGIN PASSWORD 'MetaSvc_Dev2025' NOINHERIT;
+  ELSE ALTER ROLE meta_svc WITH LOGIN PASSWORD 'MetaSvc_Dev2025' NOINHERIT; END IF;
+END; $$;
+GRANT app_user TO meta_svc;
+
+GRANT USAGE ON SCHEMA public TO meta_svc;
+GRANT USAGE ON SCHEMA ext    TO meta_svc;
+GRANT USAGE ON SCHEMA crm    TO meta_svc;
+GRANT USAGE ON SCHEMA iam    TO meta_svc;
+GRANT USAGE ON SCHEMA entity TO meta_svc;
+DO $$
+DECLARE v_db TEXT := current_database();
+BEGIN
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO meta_svc', v_db);
+END; $$;

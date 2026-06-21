@@ -102,8 +102,8 @@ export default function InlineAssignmentSelector({
 
   const currentAssigneeLabel = (() => {
     if (!existing) return null;
-    if (existing.assignee_name) return existing.assignee_name;
-    if (existing.assignee_email) return existing.assignee_email;
+    if (existing.assigned_rep_name) return existing.assigned_rep_name;
+    if (existing.assigned_rep_email) return existing.assigned_rep_email;
     const inList = candidatesById.get(existing.assigned_to);
     if (inList) return inList.name ?? inList.email;
     return 'Unknown user';

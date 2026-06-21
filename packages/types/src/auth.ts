@@ -33,6 +33,8 @@ export interface JwtPayload {
   tenant_id: string;
   pwd_iat: number;
   jti: string;
+  /** Set to true when the user must change their password before any other action */
+  force_password_change?: boolean;
   iat?: number;
   exp?: number;
 }

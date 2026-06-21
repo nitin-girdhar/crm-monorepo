@@ -10,7 +10,7 @@ export async function insertActivity(input: InsertActivityInput): Promise<void> 
 
   await withServiceTx(async (tx) => {
     await tx.unsafe(
-      `INSERT INTO activities (action_type, performed_by, target_id, target_type, meta)
+      `INSERT INTO audit.activities (action_type, performed_by, target_id, target_type, meta)
        VALUES ($1, $2::uuid, $3, $4, $5::jsonb)`,
       [
         input.action_type,

@@ -5,10 +5,10 @@ const CAMPAIGN_SELECT = `
   SELECT ac.id, ac.org_id, ac.name, ac.budget, ac.started_at, ac.ended_at, ac.created_at, ac.updated_at,
          mp.name AS platform_name, cs.name AS status_name, cs.id AS status_id, mp.id AS platform_id,
          COUNT(ml.id) FILTER (WHERE NOT ml.is_deleted) AS lead_count
-  FROM ad_campaigns ac
-  JOIN marketing_platforms mp ON mp.id = ac.platform_id
-  JOIN campaign_statuses cs ON cs.id = ac.status_id
-  LEFT JOIN marketing_leads ml ON ml.campaign_id = ac.id
+  FROM marketing.ad_campaigns ac
+  JOIN marketing.marketing_platforms mp ON mp.id = ac.platform_id
+  JOIN marketing.campaign_statuses cs ON cs.id = ac.status_id
+  LEFT JOIN crm.marketing_leads ml ON ml.campaign_id = ac.id
   WHERE NOT ac.is_deleted
 `;
 
@@ -49,12 +49,12 @@ export async function getCampaignById(
 
 export async function listMarketingPlatforms() {
   return withServiceTx(async (tx) => {
-    return tx.unsafe(`SELECT id, name, description FROM marketing_platforms ORDER BY name`);
+    return tx.unsafe(`SELECT id, name, description FROM marketing.marketing_platforms ORDER BY name`);
   });
 }
 
 export async function listCampaignStatuses() {
   return withServiceTx(async (tx) => {
-    return tx.unsafe(`SELECT id, name, description FROM campaign_statuses ORDER BY name`);
+    return tx.unsafe(`SELECT id, name, description FROM marketing.campaign_statuses ORDER BY name`);
   });
 }

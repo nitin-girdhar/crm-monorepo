@@ -39,7 +39,7 @@ export async function activitiesRoutes(app: FastifyInstance): Promise<void> {
     const activities = await withServiceTx(async (tx) => {
       return tx.unsafe(
         `SELECT id, action_type, performed_by, target_id, target_type, meta, created_at
-         FROM activities
+         FROM audit.activities
          ORDER BY created_at DESC
          LIMIT 100`,
       );

@@ -1,10 +1,28 @@
 import type { FastifyInstance } from 'fastify';
-import { createLeadSchema, updateLeadSchema } from '@crm/validation';
-import { getLeads, getLeadById, getLeadTimeline, getLeadInteractions, getLeadAssignmentHistory, getLeadFollowUps, listFollowUps, getStageOptions, getStageOutcomes } from '../queries/leads.js';
+import {
+  createLeadSchema,
+  updateLeadSchema,
+  updateFollowUpSchema,
+  createInteractionSchema,
+  createFollowUpSchema,
+} from '@crm/validation';
+import { RANKS } from '@crm/permissions';
+import {
+  getLeads,
+  getLeadById,
+  getLeadTimeline,
+  getLeadInteractions,
+  getLeadAssignmentHistory,
+  getLeadFollowUps,
+  listFollowUps,
+  getStageOptions,
+  getStageOutcomes,
+} from '../queries/leads.js';
 import { createLead, updateLead, deleteLead, createInteraction } from '../mutations/leads.js';
 import { createFollowUp, updateFollowUp, deleteFollowUp } from '../mutations/follow-ups.js';
 import { toLeadView } from '../serializers/leads.js';
 import { logActivity } from '../activity-logger.js';
+import { parseAuthContext } from '../lib/auth-context.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -14,15 +32,25 @@ function isValidUuid(v: string): boolean {
 
 export async function leadsRoutes(app: FastifyInstance): Promise<void> {
   app.get('/leads', async (request, reply) => {
-    const org_id = request.headers['x-org-id'] as string;
-    const user_id = request.headers['x-user-id'] as string;
-    const rank = parseInt(request.headers['x-rank'] as string ?? '0', 10);
-    const role = (request.headers['x-user-role'] as string) || 'org_admin';
-    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
-    if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
+    const ctx = parseAuthContext(request, reply);
+    if (!ctx) return;
+    const { org_id, user_id, role, tenant_id, rank } = ctx;
 
     const qs = request.query as Record<string, string>;
-    const org_ids = qs['org_ids'] ? qs['org_ids'].split(',').filter(Boolean) : undefined;
+
+    // Validate client-supplied org_ids against the user's actual access scope.
+    // super_admin/tenant_admin: RLS enforces tenant scope at DB level, allow pass-through.
+    // All other roles: ignore supplied org_ids and use only the token's org_id.
+    let org_ids: string[] | undefined;
+    if (qs['org_ids']) {
+      const supplied = qs['org_ids'].split(',').filter(isValidUuid);
+      if (role === 'super_admin' || role === 'tenant_admin') {
+        org_ids = supplied.length > 0 ? supplied : undefined;
+      } else {
+        // Scope to caller's own org only; RLS is the DB-side backstop
+        org_ids = [org_id];
+      }
+    }
 
     const result = await getLeads(org_id, user_id, {
       status: qs['status'],
@@ -52,11 +80,9 @@ export async function leadsRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post('/leads', async (request, reply) => {
-    const org_id = request.headers['x-org-id'] as string;
-    const user_id = request.headers['x-user-id'] as string;
-    const role = (request.headers['x-user-role'] as string) || 'org_admin';
-    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
-    if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
+    const ctx = parseAuthContext(request, reply);
+    if (!ctx) return;
+    const { org_id, user_id, role, tenant_id } = ctx;
 
     const parsed = createLeadSchema.safeParse(request.body);
     if (!parsed.success) {
@@ -76,11 +102,9 @@ export async function leadsRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get('/follow-ups', async (request, reply) => {
-    const org_id = request.headers['x-org-id'] as string;
-    const user_id = request.headers['x-user-id'] as string;
-    const role = (request.headers['x-user-role'] as string) || 'org_admin';
-    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
-    if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
+    const ctx = parseAuthContext(request, reply);
+    if (!ctx) return;
+    const { org_id, user_id, role, tenant_id } = ctx;
 
     const qs = request.query as Record<string, string>;
     const pipeline = await listFollowUps(org_id, user_id, {
@@ -93,11 +117,9 @@ export async function leadsRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get('/leads/:id', async (request, reply) => {
-    const org_id = request.headers['x-org-id'] as string;
-    const user_id = request.headers['x-user-id'] as string;
-    const role = (request.headers['x-user-role'] as string) || 'org_admin';
-    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
-    if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
+    const ctx = parseAuthContext(request, reply);
+    if (!ctx) return;
+    const { org_id, user_id, role, tenant_id } = ctx;
 
     const { id } = request.params as { id: string };
     if (!isValidUuid(id)) return reply.status(400).send({ error: 'Invalid lead id' });
@@ -109,11 +131,9 @@ export async function leadsRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.patch('/leads/:id', async (request, reply) => {
-    const org_id = request.headers['x-org-id'] as string;
-    const user_id = request.headers['x-user-id'] as string;
-    const role = (request.headers['x-user-role'] as string) || 'org_admin';
-    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
-    if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
+    const ctx = parseAuthContext(request, reply);
+    if (!ctx) return;
+    const { org_id, user_id, role, tenant_id } = ctx;
 
     const { id } = request.params as { id: string };
     if (!isValidUuid(id)) return reply.status(400).send({ error: 'Invalid lead id' });
@@ -139,34 +159,45 @@ export async function leadsRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(200).send({ ok: true });
     } catch (err) {
       const msg = (err as Error).message;
-      if (msg.includes('hierarchy authority')) return reply.status(403).send({ error: msg });
-      if (msg.includes('outcome_comment is required')) return reply.status(400).send({ error: msg });
-      if (msg.includes('outcome_id')) return reply.status(400).send({ error: msg });
+      if (msg.includes('hierarchy authority')) return reply.status(403).send({ error: 'You do not have authority to perform this stage transition.' });
+      if (msg.includes('outcome_comment is required')) return reply.status(400).send({ error: 'A comment is required for the selected outcome.' });
+      if (msg.includes('outcome_id')) return reply.status(400).send({ error: 'Invalid or missing outcome for the selected stage.' });
       throw err;
     }
   });
 
   app.delete('/leads/:id', async (request, reply) => {
-    const org_id = request.headers['x-org-id'] as string;
-    const user_id = request.headers['x-user-id'] as string;
-    const role = (request.headers['x-user-role'] as string) || 'org_admin';
-    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
-    if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
+    const ctx = parseAuthContext(request, reply);
+    if (!ctx) return;
+    const { org_id, user_id, role, tenant_id, rank } = ctx;
+
+    if (rank < RANKS.ADMIN) {
+      return reply.status(403).send({ error: 'Only org admins can delete leads.' });
+    }
 
     const { id } = request.params as { id: string };
     if (!isValidUuid(id)) return reply.status(400).send({ error: 'Invalid lead id' });
 
+    const body = request.body as Record<string, unknown> | undefined;
+    const comment = body?.['comment'] ? String(body['comment']).trim() : '';
+    if (!comment) {
+      return reply.status(400).send({ error: 'A deletion comment is required.' });
+    }
+
     await deleteLead(org_id, user_id, id, role, tenant_id);
-    await logActivity({ action_type: 'lead_deleted', performed_by: user_id, lead_id: id });
+    await logActivity({
+      action_type: 'lead_deleted',
+      performed_by: user_id,
+      lead_id: id,
+      new_value: { comment },
+    });
     return reply.status(200).send({ ok: true });
   });
 
   app.get('/leads/:id/timeline', async (request, reply) => {
-    const org_id = request.headers['x-org-id'] as string;
-    const user_id = request.headers['x-user-id'] as string;
-    const role = (request.headers['x-user-role'] as string) || 'org_admin';
-    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
-    if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
+    const ctx = parseAuthContext(request, reply);
+    if (!ctx) return;
+    const { org_id, user_id, role, tenant_id } = ctx;
 
     const { id } = request.params as { id: string };
     if (!isValidUuid(id)) return reply.status(400).send({ error: 'Invalid lead id' });
@@ -176,11 +207,9 @@ export async function leadsRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get('/leads/:id/interactions', async (request, reply) => {
-    const org_id = request.headers['x-org-id'] as string;
-    const user_id = request.headers['x-user-id'] as string;
-    const role = (request.headers['x-user-role'] as string) || 'org_admin';
-    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
-    if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
+    const ctx = parseAuthContext(request, reply);
+    if (!ctx) return;
+    const { org_id, user_id, role, tenant_id } = ctx;
 
     const { id } = request.params as { id: string };
     if (!isValidUuid(id)) return reply.status(400).send({ error: 'Invalid lead id' });
@@ -190,32 +219,38 @@ export async function leadsRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post('/leads/:id/interactions', async (request, reply) => {
-    const org_id = request.headers['x-org-id'] as string;
-    const user_id = request.headers['x-user-id'] as string;
-    const role = (request.headers['x-user-role'] as string) || 'org_admin';
-    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
-    if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
+    const ctx = parseAuthContext(request, reply);
+    if (!ctx) return;
+    const { org_id, user_id, role, tenant_id } = ctx;
 
     const { id } = request.params as { id: string };
     if (!isValidUuid(id)) return reply.status(400).send({ error: 'Invalid lead id' });
 
-    const body = request.body as Record<string, unknown>;
+    const parsed = createInteractionSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'Validation failed', details: parsed.error.issues });
+    }
 
-    const interaction = await createInteraction(org_id, user_id, id, {
-      interaction_type_name: body['interaction_type'] ? String(body['interaction_type']) : undefined,
-      notes: body['notes'] ? String(body['notes']) : undefined,
-      occurred_at: body['occurred_at'] ? String(body['occurred_at']) : undefined,
-    }, role, tenant_id);
+    const interaction = await createInteraction(
+      org_id,
+      user_id,
+      id,
+      {
+        interaction_type_name: parsed.data.interaction_type,
+        notes: parsed.data.notes,
+        occurred_at: parsed.data.occurred_at,
+      },
+      role,
+      tenant_id,
+    );
     await logActivity({ action_type: 'interaction_created', performed_by: user_id, lead_id: id });
     return reply.status(201).send({ interaction });
   });
 
   app.get('/leads/:id/assignment-history', async (request, reply) => {
-    const org_id = request.headers['x-org-id'] as string;
-    const user_id = request.headers['x-user-id'] as string;
-    const role = (request.headers['x-user-role'] as string) || 'org_admin';
-    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
-    if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
+    const ctx = parseAuthContext(request, reply);
+    if (!ctx) return;
+    const { org_id, user_id, role, tenant_id } = ctx;
 
     const { id } = request.params as { id: string };
     if (!isValidUuid(id)) return reply.status(400).send({ error: 'Invalid lead id' });
@@ -225,11 +260,9 @@ export async function leadsRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get('/leads/:id/follow-ups', async (request, reply) => {
-    const org_id = request.headers['x-org-id'] as string;
-    const user_id = request.headers['x-user-id'] as string;
-    const role = (request.headers['x-user-role'] as string) || 'org_admin';
-    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
-    if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
+    const ctx = parseAuthContext(request, reply);
+    if (!ctx) return;
+    const { org_id, user_id, role, tenant_id } = ctx;
 
     const { id } = request.params as { id: string };
     if (!isValidUuid(id)) return reply.status(400).send({ error: 'Invalid lead id' });
@@ -239,65 +272,69 @@ export async function leadsRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post('/leads/:id/follow-ups', async (request, reply) => {
-    const org_id = request.headers['x-org-id'] as string;
-    const user_id = request.headers['x-user-id'] as string;
-    const role = (request.headers['x-user-role'] as string) || 'org_admin';
-    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
-    if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
+    const ctx = parseAuthContext(request, reply);
+    if (!ctx) return;
+    const { org_id, user_id, role, tenant_id } = ctx;
 
     const { id } = request.params as { id: string };
     if (!isValidUuid(id)) return reply.status(400).send({ error: 'Invalid lead id' });
 
-    const body = request.body as Record<string, unknown>;
-    if (!body['scheduled_at']) {
-      return reply.status(400).send({ error: 'scheduled_at is required' });
+    const parsed = createFollowUpSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'Validation failed', details: parsed.error.issues });
     }
 
-    const follow_up = await createFollowUp(org_id, user_id, id, {
-      assigned_user_id: body['assigned_user_id'] ? String(body['assigned_user_id']) : undefined,
-      scheduled_at: String(body['scheduled_at']),
-      notes: body['notes'] ? String(body['notes']) : undefined,
-    }, role, tenant_id);
+    const follow_up = await createFollowUp(
+      org_id,
+      user_id,
+      id,
+      {
+        assigned_user_id: parsed.data.assigned_user_id,
+        scheduled_at: parsed.data.scheduled_at,
+        notes: parsed.data.notes,
+      },
+      role,
+      tenant_id,
+    );
     await logActivity({ action_type: 'follow_up_created', performed_by: user_id, lead_id: id });
     return reply.status(201).send({ follow_up });
   });
 
   app.patch('/leads/:id/follow-ups/:follow_up_id', async (request, reply) => {
-    const org_id = request.headers['x-org-id'] as string;
-    const user_id = request.headers['x-user-id'] as string;
-    const role = (request.headers['x-user-role'] as string) || 'org_admin';
-    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
-    if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
+    const ctx = parseAuthContext(request, reply);
+    if (!ctx) return;
+    const { org_id, user_id, role, tenant_id } = ctx;
 
     const { follow_up_id } = request.params as { id: string; follow_up_id: string };
     if (!isValidUuid(follow_up_id)) return reply.status(400).send({ error: 'Invalid follow_up_id' });
 
-    const body = request.body as Record<string, unknown>;
+    const parsed = updateFollowUpSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'Validation failed', details: parsed.error.issues });
+    }
 
-    const action = body['action'] ? String(body['action']) : undefined;
-    let status_name = body['status_name'] ? String(body['status_name']) : undefined;
-    let completed_at = body['completed_at'] ? String(body['completed_at']) : undefined;
-    let scheduled_at = body['scheduledAt'] ? String(body['scheduledAt']) : undefined;
+    const { action } = parsed.data;
+    let status_name = parsed.data.status_name;
+    let completed_at = parsed.data.completed_at;
+
     if (action === 'complete')   { status_name = 'completed'; completed_at = new Date().toISOString(); }
-    if (action === 'reschedule') { status_name = 'pending'; }
+    if (action === 'reschedule') { status_name = 'pending'; completed_at = undefined; }
     if (action === 'add_note')   { status_name = undefined; }
 
     const result = await updateFollowUp(org_id, user_id, follow_up_id, {
       status_name,
       completed_at,
-      scheduled_at,
-      notes: body['notes'] ? String(body['notes']) : undefined,
+      scheduled_at: parsed.data.scheduled_at,
+      notes: parsed.data.notes,
     }, role, tenant_id);
     if (!result) return reply.status(404).send({ error: 'Follow-up not found' });
     return reply.status(200).send({ ok: true });
   });
 
   app.delete('/leads/:id/follow-ups/:follow_up_id', async (request, reply) => {
-    const org_id = request.headers['x-org-id'] as string;
-    const user_id = request.headers['x-user-id'] as string;
-    const role = (request.headers['x-user-role'] as string) || 'org_admin';
-    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
-    if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
+    const ctx = parseAuthContext(request, reply);
+    if (!ctx) return;
+    const { org_id, user_id, role, tenant_id } = ctx;
 
     const { id, follow_up_id } = request.params as { id: string; follow_up_id: string };
     if (!isValidUuid(follow_up_id)) return reply.status(400).send({ error: 'Invalid follow_up_id' });

@@ -1,7 +1,7 @@
 import { withRoleTx } from '@crm/db';
 import type { Tx, SqlParams, RoleTxContext } from '@crm/db';
 
-const ALLOWED_LOOKUP_TABLES = new Set(['marketing_platforms', 'campaign_statuses']);
+const ALLOWED_LOOKUP_TABLES = new Set(['marketing.marketing_platforms', 'marketing.campaign_statuses']);
 
 async function resolveLookupId(tx: Tx, table: string, name: string): Promise<string> {
   if (!ALLOWED_LOOKUP_TABLES.has(table)) {
@@ -25,11 +25,11 @@ export async function createCampaign(
 ) {
   const ctx: RoleTxContext = { role, org_id, tenant_id, user_id };
   return withRoleTx(ctx, async (tx) => {
-    const platform_id = await resolveLookupId(tx, 'marketing_platforms', String(data['platform_name'] ?? ''));
-    const status_id = await resolveLookupId(tx, 'campaign_statuses', String(data['status_name'] ?? 'draft'));
+    const platform_id = await resolveLookupId(tx, 'marketing.marketing_platforms', String(data['platform_name'] ?? ''));
+    const status_id = await resolveLookupId(tx, 'marketing.campaign_statuses', String(data['status_name'] ?? 'draft'));
 
     const rows = await tx.unsafe(
-      `INSERT INTO ad_campaigns (org_id, name, platform_id, status_id, budget, started_at, ended_at)
+      `INSERT INTO marketing.ad_campaigns (org_id, name, platform_id, status_id, budget, started_at, ended_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id`,
       [
@@ -70,11 +70,11 @@ export async function updateCampaign(
     if (data['ended_at'] !== undefined) add('ended_at', data['ended_at']);
 
     if (data['platform_name'] !== undefined) {
-      const platform_id = await resolveLookupId(tx, 'marketing_platforms', String(data['platform_name']));
+      const platform_id = await resolveLookupId(tx, 'marketing.marketing_platforms', String(data['platform_name']));
       add('platform_id', platform_id);
     }
     if (data['status_name'] !== undefined) {
-      const status_id = await resolveLookupId(tx, 'campaign_statuses', String(data['status_name']));
+      const status_id = await resolveLookupId(tx, 'marketing.campaign_statuses', String(data['status_name']));
       add('status_id', status_id);
     }
 
@@ -82,7 +82,7 @@ export async function updateCampaign(
 
     params.push(campaign_id, org_id);
     const rows = await tx.unsafe(
-      `UPDATE ad_campaigns SET ${sets.join(', ')}
+      `UPDATE marketing.ad_campaigns SET ${sets.join(', ')}
        WHERE id = $${params.length - 1} AND org_id = $${params.length} AND NOT is_deleted
        RETURNING id`,
       params as unknown as SqlParams,
@@ -101,7 +101,7 @@ export async function deleteCampaign(
   const ctx: RoleTxContext = { role, org_id, tenant_id, user_id };
   return withRoleTx(ctx, async (tx) => {
     await tx.unsafe(
-      `UPDATE ad_campaigns
+      `UPDATE marketing.ad_campaigns
        SET is_deleted = TRUE, deleted_at = CLOCK_TIMESTAMP(), deleted_by = $1::uuid
        WHERE id = $2 AND org_id = $3`,
       [user_id, campaign_id, org_id],

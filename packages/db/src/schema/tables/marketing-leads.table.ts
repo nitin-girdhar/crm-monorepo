@@ -1,0 +1,41 @@
+import { uuid, text, boolean, timestamp, jsonb, integer, smallint } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { crmSchema } from '../pg-schemas';
+
+export const marketingLeadsTable = crmSchema.table('marketing_leads', {
+  id:              uuid('id').primaryKey().default(sql`gen_uuidv7()`),
+  orgId:           uuid('org_id').notNull(),
+  firstName:       text('first_name').notNull(),
+  middleName:      text('middle_name'),
+  lastName:        text('last_name').notNull().default(''),
+  fullName:        text('full_name').generatedAlwaysAs(
+    sql`TRIM(first_name || COALESCE(' ' || NULLIF(middle_name, ''), '') || COALESCE(' ' || NULLIF(last_name, ''), ''))`,
+  ),
+  phone:           text('phone'),
+  email:           text('email'),
+  addressLine1:    text('address_line1'),
+  addressLine2:    text('address_line2'),
+  landmark:        text('landmark'),
+  pincode:         text('pincode'),
+  city:            text('city'),
+  cityId:          integer('city_id'),
+  stateId:         smallint('state_id'),
+  countryId:       smallint('country_id'),
+  stageId:         uuid('stage_id'),
+  outcomeId:       uuid('outcome_id'),
+  outcomeComment:  text('outcome_comment'),
+  campaignId:      uuid('campaign_id'),
+  sourceId:        uuid('source_id'),
+  branchId:        uuid('branch_id'),
+  assignedUserId:  uuid('assigned_user_id'),
+  duplicateLeadId: uuid('duplicate_lead_id'),
+  rawWebhookData:  jsonb('raw_webhook_data').notNull().default({}),
+  metadata:        jsonb('metadata').notNull().default({}),
+  tags:            text('tags').array().notNull().default(sql`'{}'`),
+  isDeleted:       boolean('is_deleted').notNull().default(false),
+  deletedAt:       timestamp('deleted_at', { withTimezone: true }),
+  deletedBy:       uuid('deleted_by'),
+  createdBy:       uuid('created_by'),
+  createdAt:       timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:       timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});

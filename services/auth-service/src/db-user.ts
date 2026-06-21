@@ -16,14 +16,14 @@ const USER_SELECT_HOME = `
     o.name      AS org_name,
     o.tenant_id AS tenant_id,
     t.name      AS tenant_name
-  FROM users u
-  JOIN user_roles    ur ON ur.id = u.role_id
-  JOIN organizations o  ON o.id  = u.org_id
-  JOIN tenants       t  ON t.id  = o.tenant_id
-  LEFT JOIN users    m  ON m.id  = u.manager_id
+  FROM iam.users u
+  JOIN iam.user_roles    ur ON ur.id = u.role_id
+  JOIN entity.organizations o  ON o.id  = u.org_id
+  JOIN entity.tenants       t  ON t.id  = o.tenant_id
+  LEFT JOIN iam.users    m  ON m.id  = u.manager_id
 `;
 
-// SELECT for org-scoped login: resolves role from user_org_mapping for the
+// SELECT for org-scoped login: resolves role from iam.user_org_mapping for the
 // target org so the JWT carries the correct rank for the org being accessed.
 // Access is allowed if the user's home org matches OR an active mapping exists.
 const USER_SELECT_ORG = `
@@ -42,16 +42,16 @@ const USER_SELECT_ORG = `
     tgt.name     AS org_name,
     tgt.tenant_id AS tenant_id,
     t.name       AS tenant_name
-  FROM users u
-  JOIN user_roles    ur     ON ur.id  = u.role_id
-  JOIN organizations home   ON home.id = u.org_id
-  JOIN organizations tgt    ON tgt.id  = $2::uuid AND NOT tgt.is_deleted
-  JOIN tenants       t      ON t.id    = home.tenant_id
-  LEFT JOIN users    m      ON m.id    = u.manager_id
-  LEFT JOIN user_org_mapping uom  ON uom.user_id = u.id
+  FROM iam.users u
+  JOIN iam.user_roles    ur     ON ur.id  = u.role_id
+  JOIN entity.organizations home   ON home.id = u.org_id
+  JOIN entity.organizations tgt    ON tgt.id  = $2::uuid AND NOT tgt.is_deleted
+  JOIN entity.tenants       t      ON t.id    = home.tenant_id
+  LEFT JOIN iam.users    m      ON m.id    = u.manager_id
+  LEFT JOIN iam.user_org_mapping uom  ON uom.user_id = u.id
                                  AND uom.org_id  = $2::uuid
                                  AND uom.is_active
-  LEFT JOIN user_roles       uom_r ON uom_r.id = uom.role_id
+  LEFT JOIN iam.user_roles       uom_r ON uom_r.id = uom.role_id
 `;
 
 export async function getUserByEmail(
@@ -90,7 +90,7 @@ export async function getUserById(id: string): Promise<DatabaseUser | null> {
 export async function updateLastLogin(user_id: string): Promise<void> {
   await withServiceTx(async (tx) => {
     await tx.unsafe(
-      `UPDATE users SET last_login_at = CLOCK_TIMESTAMP() WHERE id = $1`,
+      `UPDATE iam.users SET last_login_at = CLOCK_TIMESTAMP() WHERE id = $1`,
       [user_id],
     );
   });

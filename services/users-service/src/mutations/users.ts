@@ -3,7 +3,7 @@ import { withRoleTx, withServiceTx } from '@crm/db';
 import type { SqlParams, RoleTxContext } from '@crm/db';
 import { config } from '../config.js';
 
-const ALLOWED_LOOKUP_TABLES = new Set(['user_roles']);
+const ALLOWED_LOOKUP_TABLES = new Set(['iam.user_roles']);
 
 async function resolveLookupId(table: string, name: string): Promise<string> {
   if (!ALLOWED_LOOKUP_TABLES.has(table)) {
@@ -41,11 +41,11 @@ export async function createUser(
 ) {
   const ctx: RoleTxContext = { role, org_id, tenant_id, user_id: actor_user_id };
   return withRoleTx(ctx, async (tx) => {
-    const role_id = await resolveLookupId('user_roles', data.role_name);
+    const role_id = await resolveLookupId('iam.user_roles', data.role_name);
     const password_hash = await bcrypt.hash(data.password, config.bcryptRounds);
 
     const rows = await tx.unsafe(
-      `INSERT INTO users
+      `INSERT INTO iam.users
          (org_id, first_name, middle_name, last_name, email, mobile, role_id,
           manager_id, password_hash, password_changed_at, is_active, force_password_change)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CLOCK_TIMESTAMP(), $10, $11)
@@ -66,9 +66,9 @@ export async function createUser(
     );
     const created = rows[0] as unknown as { id: string };
 
-    // Seed user_org_mapping so RLS and multi-org queries work immediately.
+    // Seed iam.user_org_mapping so RLS and multi-org queries work immediately.
     await tx.unsafe(
-      `INSERT INTO user_org_mapping (user_id, org_id, role_id, granted_by)
+      `INSERT INTO iam.user_org_mapping (user_id, org_id, role_id, granted_by)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (user_id, org_id) DO UPDATE
          SET role_id    = EXCLUDED.role_id,
@@ -122,7 +122,7 @@ export async function updateUser(
     if (data.manager_id !== undefined) add('manager_id', data.manager_id);
 
     if (data.role_name !== undefined) {
-      const role_id = await resolveLookupId('user_roles', data.role_name);
+      const role_id = await resolveLookupId('iam.user_roles', data.role_name);
       add('role_id', role_id);
       add('password_changed_at', new Date());
     }
@@ -137,17 +137,17 @@ export async function updateUser(
 
     params.push(target_user_id, org_id);
     const rows = await tx.unsafe(
-      `UPDATE users SET ${sets.join(', ')}
+      `UPDATE iam.users SET ${sets.join(', ')}
        WHERE id = $${params.length - 1} AND org_id = $${params.length} AND NOT is_deleted
        RETURNING id, password_changed_at, role_id`,
       params as unknown as SqlParams,
     );
     const updated = (rows as unknown as Array<Record<string, unknown>>)[0] ?? null;
 
-    // Keep user_org_mapping in sync when the role changes for this org.
+    // Keep iam.user_org_mapping in sync when the role changes for this org.
     if (updated && data.role_name !== undefined) {
       await tx.unsafe(
-        `UPDATE user_org_mapping SET role_id = $1, updated_at = CLOCK_TIMESTAMP()
+        `UPDATE iam.user_org_mapping SET role_id = $1, updated_at = CLOCK_TIMESTAMP()
          WHERE user_id = $2 AND org_id = $3`,
         [updated['role_id'], target_user_id, org_id] as unknown as SqlParams,
       );
@@ -167,7 +167,7 @@ export async function softDeleteUser(
   const ctx: RoleTxContext = { role, org_id, tenant_id, user_id: actor_user_id };
   return withRoleTx(ctx, async (tx) => {
     await tx.unsafe(
-      `UPDATE users
+      `UPDATE iam.users
        SET is_deleted = TRUE, is_active = FALSE,
            deleted_at = CLOCK_TIMESTAMP(), deleted_by = $1::uuid
        WHERE id = $2 AND org_id = $3`,
@@ -175,7 +175,7 @@ export async function softDeleteUser(
     );
     // Revoke all org mappings so the user can no longer access any org.
     await tx.unsafe(
-      `UPDATE user_org_mapping SET is_active = FALSE, updated_at = CLOCK_TIMESTAMP()
+      `UPDATE iam.user_org_mapping SET is_active = FALSE, updated_at = CLOCK_TIMESTAMP()
        WHERE user_id = $1`,
       [target_user_id],
     );
@@ -194,7 +194,7 @@ export async function adminResetPassword(
   return withRoleTx(ctx, async (tx) => {
     const hash = await bcrypt.hash(temporary_password, config.bcryptRounds);
     const rows = await tx.unsafe(
-      `UPDATE users
+      `UPDATE iam.users
        SET password_hash = $1, password_changed_at = CLOCK_TIMESTAMP(), force_password_change = TRUE
        WHERE id = $2 AND org_id = $3 AND NOT is_deleted
        RETURNING id`,

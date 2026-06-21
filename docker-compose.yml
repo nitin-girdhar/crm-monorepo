@@ -1,20 +1,26 @@
-version: '3.9'
+# ── Shared environment blocks (YAML anchors) ─────────────────────────────────
+# All variables are read from .env — change DB_NAME, passwords, ports, etc. there.
+x-db-env: &db-env
+  DATABASE_URL: postgres://${DB_LEAD_SVC_USER}:${DB_LEAD_SVC_PASSWORD}@${DB_CONTAINER_NAME}:5432/${DB_NAME}
+  DATABASE_URL_TENANT: postgres://${DB_TENANT_SVC_USER}:${DB_TENANT_SVC_PASSWORD}@${DB_CONTAINER_NAME}:5432/${DB_NAME}
+  DATABASE_URL_SERVICE: postgres://${DB_SERVICE_USER}:${DB_SERVICE_PASSWORD}@${DB_CONTAINER_NAME}:5432/${DB_NAME}
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18.4
+    container_name: ${DB_CONTAINER_NAME}
     restart: unless-stopped
     environment:
-      POSTGRES_DB: crm
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - '5432:5432'
+      - '${DB_PORT}:5432'
     volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ${DB_DATA_PATH}:/var/lib/postgresql
+      - ./db_scripts/01_init-db.sql:/docker-entrypoint-initdb.d/01-init.sql
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${DB_NAME}']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -26,9 +32,10 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      PORT: '4001'
+      PORT: ${AUTH_SERVICE_PORT}
+      <<: *db-env
     ports:
-      - '4001:4001'
+      - '${AUTH_SERVICE_PORT}:${AUTH_SERVICE_PORT}'
     depends_on:
       postgres:
         condition: service_healthy
@@ -40,9 +47,11 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      PORT: '4002'
+      PORT: ${USERS_SERVICE_PORT}
+      <<: *db-env
+      ACTIVITIES_SERVICE_URL: http://activities-service:${ACTIVITIES_SERVICE_PORT}
     ports:
-      - '4002:4002'
+      - '${USERS_SERVICE_PORT}:${USERS_SERVICE_PORT}'
     depends_on:
       postgres:
         condition: service_healthy
@@ -54,9 +63,11 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      PORT: '4003'
+      PORT: ${LEADS_SERVICE_PORT}
+      <<: *db-env
+      ACTIVITIES_SERVICE_URL: http://activities-service:${ACTIVITIES_SERVICE_PORT}
     ports:
-      - '4003:4003'
+      - '${LEADS_SERVICE_PORT}:${LEADS_SERVICE_PORT}'
     depends_on:
       postgres:
         condition: service_healthy
@@ -68,9 +79,11 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      PORT: '4004'
+      PORT: ${ASSIGNMENTS_SERVICE_PORT}
+      <<: *db-env
+      ACTIVITIES_SERVICE_URL: http://activities-service:${ACTIVITIES_SERVICE_PORT}
     ports:
-      - '4004:4004'
+      - '${ASSIGNMENTS_SERVICE_PORT}:${ASSIGNMENTS_SERVICE_PORT}'
     depends_on:
       postgres:
         condition: service_healthy
@@ -82,9 +95,10 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      PORT: '4005'
+      PORT: ${ANALYTICS_SERVICE_PORT}
+      <<: *db-env
     ports:
-      - '4005:4005'
+      - '${ANALYTICS_SERVICE_PORT}:${ANALYTICS_SERVICE_PORT}'
     depends_on:
       postgres:
         condition: service_healthy
@@ -96,9 +110,25 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      PORT: '4006'
+      PORT: ${ACTIVITIES_SERVICE_PORT}
+      <<: *db-env
     ports:
-      - '4006:4006'
+      - '${ACTIVITIES_SERVICE_PORT}:${ACTIVITIES_SERVICE_PORT}'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  meta-conversion-api:
+    build:
+      context: .
+      dockerfile: services/meta-conversion-api/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: ${META_SERVICE_PORT}
+      <<: *db-env
+    ports:
+      - '${META_SERVICE_PORT}:${META_SERVICE_PORT}'
     depends_on:
       postgres:
         condition: service_healthy
@@ -110,9 +140,16 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      PORT: '4000'
+      PORT: ${GATEWAY_PORT}
+      AUTH_SERVICE_URL: http://auth-service:${AUTH_SERVICE_PORT}
+      USERS_SERVICE_URL: http://users-service:${USERS_SERVICE_PORT}
+      LEADS_SERVICE_URL: http://leads-service:${LEADS_SERVICE_PORT}
+      ASSIGNMENTS_SERVICE_URL: http://assignments-service:${ASSIGNMENTS_SERVICE_PORT}
+      ANALYTICS_SERVICE_URL: http://analytics-service:${ANALYTICS_SERVICE_PORT}
+      ACTIVITIES_SERVICE_URL: http://activities-service:${ACTIVITIES_SERVICE_PORT}
+      META_SERVICE_URL: http://meta-conversion-api:${META_SERVICE_PORT}
     ports:
-      - '4000:4000'
+      - '${GATEWAY_PORT}:${GATEWAY_PORT}'
     depends_on:
       - auth-service
       - users-service
@@ -120,6 +157,7 @@ services:
       - assignments-service
       - analytics-service
       - activities-service
+      - meta-conversion-api
 
   web:
     build:
@@ -129,10 +167,8 @@ services:
     env_file: .env
     environment:
       PORT: '3000'
+      NEXT_PUBLIC_API_URL: http://api-gateway:${GATEWAY_PORT}
     ports:
       - '3000:3000'
     depends_on:
       - api-gateway
-
-volumes:
-  pgdata:

@@ -7,12 +7,15 @@
     "dev": "tsx watch --env-file ../../.env src/server.ts",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
-    "clean": "rimraf dist"
+    "clean": "rimraf dist",
+    "dev:local": "tsx watch --env-file .env src/server.ts"
   },
   "dependencies": {
     "@crm/db": "workspace:*",
+    "drizzle-orm": "^0.44.0",
     "fastify": "^5.2.1",
-    "pino": "^9.6.0"
+    "pino": "^9.6.0",
+    "zod": "^3.22.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.10",

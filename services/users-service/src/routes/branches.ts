@@ -1,13 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { getBranches, getAllBranches, getLeadSources } from '../queries/users.js';
+import { parseAuthContext } from '../lib/auth-context.js';
 
 export async function branchesRoutes(app: FastifyInstance): Promise<void> {
   app.get('/branches', async (request, reply) => {
-    const org_id = request.headers['x-org-id'] as string;
-    const user_id = request.headers['x-user-id'] as string;
-    const role = (request.headers['x-user-role'] as string) || 'org_admin';
-    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
-    if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
+    const ctx = parseAuthContext(request, reply);
+    if (!ctx) return;
+    const { org_id, user_id, role, tenant_id } = ctx;
 
     const qs = request.query as Record<string, string>;
     const cityIds    = qs['cityIds']    ? qs['cityIds'].split(',').map(Number).filter(Boolean)    : [];
@@ -19,17 +18,17 @@ export async function branchesRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get('/branches/all', async (request, reply) => {
-    const org_id = request.headers['x-org-id'] as string;
-    const user_id = request.headers['x-user-id'] as string;
-    const role = (request.headers['x-user-role'] as string) || 'org_admin';
-    const tenant_id = (request.headers['x-tenant-id'] as string) || '';
-    if (!org_id || !user_id) return reply.status(401).send({ error: 'Missing auth headers' });
+    const ctx = parseAuthContext(request, reply);
+    if (!ctx) return;
+    const { org_id, user_id, role, tenant_id } = ctx;
 
     const branches = await getAllBranches(org_id, user_id, role, tenant_id);
     return reply.status(200).send(branches);
   });
 
-  app.get('/lead-sources', async (_request, reply) => {
+  app.get('/lead-sources', async (request, reply) => {
+    const ctx = parseAuthContext(request, reply);
+    if (!ctx) return;
     const sources = await getLeadSources();
     return reply.status(200).send(sources);
   });

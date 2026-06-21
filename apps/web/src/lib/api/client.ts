@@ -21,6 +21,9 @@ async function request<T>(
     });
   }
 
+  if (res.status === 204 || res.headers.get('content-length') === '0') {
+    return undefined as T;
+  }
   return res.json() as Promise<T>;
 }
 
@@ -28,17 +31,17 @@ async function request<T>(
 
 export const auth = {
   login: (email: string, password: string, org_id?: string) =>
-    request<{ user: import('@crm/types').SessionUser }>('/auth/login', {
+    request<{ success: true; data: { user: import('@crm/types').SessionUser } }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password, org_id }),
     }),
 
-  logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
+  logout: () => request<{ success: true; data: null }>('/auth/logout', { method: 'POST' }),
 
-  me: () => request<{ user: import('@crm/types').SessionUser }>('/auth/me'),
+  me: () => request<{ success: true; data: { user: import('@crm/types').SessionUser } }>('/auth/me'),
 
   changePassword: (current_password: string, new_password: string) =>
-    request<{ ok: boolean }>('/auth/change-password', {
+    request<{ success: true; data: null }>('/auth/change-password', {
       method: 'POST',
       body: JSON.stringify({ current_password, new_password }),
     }),
@@ -68,7 +71,8 @@ export const leads = {
       ),
     ).toString();
     return request<{
-      leads: import('@crm/types').LeadView[];
+      success: true;
+      data: import('@crm/types').LeadView[];
       total: number;
       page: number;
       page_size: number;
@@ -78,158 +82,177 @@ export const leads = {
   },
 
   get: (id: string) =>
-    request<{ lead: import('@crm/types').LeadView }>(`/leads/${id}`),
+    request<{ success: true; data: import('@crm/types').LeadView }>(`/leads/${id}`),
 
   create: (data: Record<string, unknown>) =>
-    request<{ lead: { id: string } }>('/leads', {
+    request<{ success: true; data: { id: string } }>('/leads', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
 
   update: (id: string, data: Record<string, unknown>) =>
-    request<{ ok: boolean }>(`/leads/${id}`, {
+    request<void>(`/leads/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
 
   delete: (id: string) =>
-    request<{ ok: boolean }>(`/leads/${id}`, { method: 'DELETE' }),
+    request<void>(`/leads/${id}`, { method: 'DELETE' }),
 
   getTimeline: (id: string) =>
-    request<{ events: unknown[] }>(`/leads/${id}/timeline`),
+    request<{ success: true; data: unknown[] }>(`/leads/${id}/timeline`),
 
   getInteractions: (id: string) =>
-    request<{ interactions: unknown[] }>(`/leads/${id}/interactions`),
+    request<{ success: true; data: unknown[] }>(`/leads/${id}/interactions`),
 
   addInteraction: (id: string, data: Record<string, unknown>) =>
-    request<{ interaction: unknown }>(`/leads/${id}/interactions`, {
+    request<{ success: true; data: unknown }>(`/leads/${id}/interactions`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
 
   getFollowUps: (id: string) =>
-    request<{ follow_ups: unknown[] }>(`/leads/${id}/follow-ups`),
+    request<{ success: true; data: unknown[] }>(`/leads/${id}/follow-ups`),
 
   addFollowUp: (id: string, data: Record<string, unknown>) =>
-    request<{ follow_up: unknown }>(`/leads/${id}/follow-ups`, {
+    request<{ success: true; data: unknown }>(`/leads/${id}/follow-ups`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
 
   updateFollowUp: (lead_id: string, follow_up_id: string, data: Record<string, unknown>) =>
-    request<{ ok: boolean }>(`/leads/${lead_id}/follow-ups/${follow_up_id}`, {
+    request<void>(`/leads/${lead_id}/follow-ups/${follow_up_id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
 
   getAssignmentHistory: (id: string) =>
-    request<{ history: unknown[] }>(`/leads/${id}/assignment-history`),
+    request<{ success: true; data: unknown[] }>(`/leads/${id}/assignment-history`),
 };
 
 // ── Users ────────────────────────────────────────────────────────────────────
 
 export const users = {
-  list: () => request<{ users: unknown[] }>('/users'),
+  list: () => request<{ success: true; data: unknown[]; total: number; page: number; page_size: number }>('/users'),
 
-  get: (id: string) => request<{ user: unknown }>(`/users/${id}`),
+  get: (id: string) => request<{ success: true; data: unknown }>(`/users/${id}`),
 
   create: (data: Record<string, unknown>) =>
-    request<{ user: { email: string; id: string }; temporary_password: string }>('/users', {
+    request<{ success: true; data: { id: string; email: string }; temporary_password: string }>('/users', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
 
   update: (id: string, data: Record<string, unknown>) =>
-    request<{ ok: boolean }>(`/users/${id}`, {
+    request<void>(`/users/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
 
   delete: (id: string) =>
-    request<{ ok: boolean }>(`/users/${id}`, { method: 'DELETE' }),
+    request<void>(`/users/${id}`, { method: 'DELETE' }),
 
   resetPassword: (id: string, new_password?: string) =>
-    request<{ temporary_password: string }>(`/users/${id}/reset-password`, {
+    request<{ success: true; data: { temporary_password: string } }>(`/users/${id}/reset-password`, {
       method: 'POST',
       body: JSON.stringify({ new_password }),
     }),
 
-  assignable: () => request<{ users: unknown[] }>('/users/assignable'),
+  assignable: () => request<{ success: true; data: unknown[] }>('/users/assignable'),
 
-  orgChart: () => request<{ chart: unknown[] }>('/users/org-chart'),
+  orgChart: () => request<{ success: true; data: unknown[] }>('/users/org-chart'),
 
-  team: () => request<{ members: unknown[] }>('/users/team'),
+  team: () => request<{ success: true; data: unknown[] }>('/users/team'),
 };
 
 // ── Assignments ───────────────────────────────────────────────────────────────
 
 export const assignments = {
-  list: () => request<{ assignments: unknown[] }>('/assignments'),
+  list: () => request<{ success: true; data: unknown[]; total: number; page: number; page_size: number }>('/assignments'),
 
-  get: (id: string) => request<{ assignment: unknown }>(`/assignments/${id}`),
+  get: (id: string) => request<{ success: true; data: unknown }>(`/assignments/${id}`),
 
   create: (data: { lead_id: string; assigned_to: string; branch?: string; notes?: string }) =>
-    request<{ assignment: unknown }>('/assignments', {
+    request<{ success: true; data: unknown }>('/assignments', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
 
   update: (id: string, data: { assigned_to: string; notes?: string }) =>
-    request<{ ok: boolean }>(`/assignments/${id}`, {
+    request<void>(`/assignments/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
 
   remove: (id: string) =>
-    request<{ ok: boolean }>(`/assignments/${id}`, { method: 'DELETE' }),
+    request<void>(`/assignments/${id}`, { method: 'DELETE' }),
+
+  leadsHistory: (params: Record<string, string | number | boolean | undefined> = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(
+        Object.entries(params)
+          .filter(([, v]) => v !== undefined && v !== '')
+          .map(([k, v]) => [k, String(v)]),
+      ),
+    ).toString();
+    return request<{
+      success: true;
+      data: import('@crm/types').LeadView[];
+      total: number;
+      page: number;
+      page_size: number;
+      stage_options: unknown[];
+      stage_outcomes: unknown[];
+    }>(`/assignments/mine${qs ? `?${qs}` : ''}`);
+  },
 };
 
 // ── Campaigns ─────────────────────────────────────────────────────────────────
 
 export const campaigns = {
-  list: () => request<{ campaigns: unknown[] }>('/campaigns'),
+  list: () => request<{ success: true; data: unknown[] }>('/campaigns'),
 
-  get: (id: string) => request<{ campaign: unknown }>(`/campaigns/${id}`),
+  get: (id: string) => request<{ success: true; data: unknown }>(`/campaigns/${id}`),
 
   create: (data: { name: string; platform_name: string; status_name?: string; budget?: number; started_at?: string; ended_at?: string }) =>
-    request<{ campaign: { id: string } }>('/campaigns', {
+    request<{ success: true; data: { id: string } }>('/campaigns', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
 
   update: (id: string, data: Record<string, unknown>) =>
-    request<{ ok: boolean }>(`/campaigns/${id}`, {
+    request<void>(`/campaigns/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
 
   delete: (id: string) =>
-    request<{ ok: boolean }>(`/campaigns/${id}`, { method: 'DELETE' }),
+    request<void>(`/campaigns/${id}`, { method: 'DELETE' }),
 };
 
 // ── Branches ─────────────────────────────────────────────────────────────────
 
 export const branches = {
-  list: () => request<Array<{ id: string; name: string; org_id: string; org_name?: string }>>('/branches'),
+  list: () => request<{ success: true; data: Array<{ id: string; name: string; org_id: string; org_name?: string }> }>('/branches'),
 
-  all: () => request<Array<{ id: string; name: string; org_id: string }>>('/branches/all'),
+  all: () => request<{ success: true; data: Array<{ id: string; name: string; org_id: string }> }>('/branches/all'),
 };
 
 // ── Lead Sources ─────────────────────────────────────────────────────────────
 
 export const lead_sources = {
-  list: () => request<Array<{ id: string; name: string }>>('/lead-sources'),
+  list: () => request<{ success: true; data: Array<{ id: string; name: string }> }>('/lead-sources'),
 };
 
 // ── Lookups ───────────────────────────────────────────────────────────────────
 
 export const lookups = {
-  leadStages: () => request<unknown[]>('/lookups/lead-stages'),
+  leadStages: () => request<{ success: true; data: unknown[] }>('/lookups/lead-stages'),
   leadStageOutcomes: (stage_id?: string) =>
-    request<unknown[]>(`/lookups/lead-stage-outcomes${stage_id !== undefined ? `?stage_id=${stage_id}` : ''}`),
-  all: () => request<{ platforms: unknown[]; interaction_types: unknown[]; sources: unknown[]; stages: unknown[]; campaign_statuses: unknown[] }>('/lookups'),
+    request<{ success: true; data: unknown[] }>(`/lookups/lead-stage-outcomes${stage_id !== undefined ? `?stage_id=${stage_id}` : ''}`),
+  all: () => request<{ success: true; data: { platforms: unknown[]; interaction_types: unknown[]; sources: unknown[]; stages: unknown[]; campaign_statuses: unknown[] } }>('/lookups'),
   cities: (state_id?: number) =>
-    request<unknown[]>(`/lookups/cities${state_id !== undefined ? `?state_id=${state_id}` : ''}`),
+    request<{ success: true; data: unknown[] }>(`/lookups/cities${state_id !== undefined ? `?state_id=${state_id}` : ''}`),
 };
 
 // ── Locations ─────────────────────────────────────────────────────────────────
@@ -244,9 +267,12 @@ export const locations = {
       ),
     ).toString();
     return request<{
-      countries: unknown[];
-      states: unknown[];
-      cities: unknown[];
+      success: true;
+      data: {
+        countries: unknown[];
+        states: unknown[];
+        cities: unknown[];
+      };
     }>(`/locations${qs ? `?${qs}` : ''}`);
   },
 };
@@ -254,14 +280,14 @@ export const locations = {
 // ── Analytics ─────────────────────────────────────────────────────────────────
 
 export const analytics = {
-  dashboard: () => request<unknown>('/analytics/dashboard'),
-  campaigns: () => request<unknown[]>('/analytics/dashboard/campaigns'),
-  performance: () => request<unknown>('/analytics/performance'),
-  pipeline: () => request<unknown[]>('/analytics/pipeline'),
+  dashboard: () => request<{ success: true; data: unknown }>('/analytics/dashboard'),
+  campaigns: () => request<{ success: true; data: unknown[] }>('/analytics/dashboard/campaigns'),
+  performance: () => request<{ success: true; data: unknown }>('/analytics/performance'),
+  pipeline: () => request<{ success: true; data: unknown[] }>('/analytics/pipeline'),
 };
 
 // ── Activities ────────────────────────────────────────────────────────────────
 
 export const activities = {
-  list: () => request<{ activities: unknown[] }>('/activities'),
+  list: () => request<{ success: true; data: unknown[] }>('/activities'),
 };

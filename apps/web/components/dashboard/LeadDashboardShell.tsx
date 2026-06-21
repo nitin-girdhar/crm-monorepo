@@ -10,6 +10,7 @@ import LocationFilters from '@/components/dashboard/LocationFilters';
 import StatsCards from '@/components/StatsCards';
 import LeadsTable from '@/components/LeadsTable';
 import DownloadButton from '@/components/common/DownloadButton';
+import { getRulesForTenant, canSeeUnassignedCard } from '@crm/permissions';
 import { applyLeadFilter } from '@/src/lib/leads/filter';
 import { buildLeadExportColumns } from '@/src/lib/export/lead-columns';
 import { buildFilename, exportRows, type ExportFormat } from '@/src/lib/export/export';
@@ -117,9 +118,23 @@ export default function LeadDashboardShell({ actor }: Props) {
       try {
         const res = await fetch('/api/users/assignable', { credentials: 'include', cache: 'no-store' });
         if (!res.ok) { if (!cancelled) setCandidates([]); return; }
-        const data = (await res.json()) as { users?: SessionUser[] };
+        const json = (await res.json()) as { data?: Record<string, unknown>[] };
         if (cancelled) return;
-        setCandidates(Array.isArray(data.users) ? data.users : []);
+        const raw = Array.isArray(json.data) ? json.data : [];
+        setCandidates(raw.map((u) => ({
+          ...u,
+          name: (u.full_name ?? u.name ?? '') as string,
+          role: (u.role_name ?? u.role ?? '') as SessionUser['role'],
+          role_label: (u.role_label ?? '') as string,
+          rank: Number(u.rank ?? 0),
+          org_id: (u.org_id ?? '') as string,
+          org_name: '',
+          tenant_id: '',
+          tenant_name: '',
+          manager_id: null,
+          manager_name: null,
+          last_login_at: null,
+        })) as SessionUser[]);
       } catch {
         if (!cancelled) setCandidates([]);
       }
@@ -196,6 +211,7 @@ export default function LeadDashboardShell({ actor }: Props) {
           actor={actor}
           activeFilter={activeFilter}
           onFilterChange={handleFilterChange}
+          hideUnassigned={!canSeeUnassignedCard(getRulesForTenant(actor.tenant_id), actor.rank)}
         />
       </div>
 

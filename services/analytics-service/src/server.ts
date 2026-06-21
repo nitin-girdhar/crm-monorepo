@@ -1,6 +1,8 @@
 import Fastify from 'fastify';
-import { config } from './config.js';
-import { analyticsRoutes } from './routes/dashboard.js';
+import { ZodError } from 'zod';
+import { config } from './config/index.js';
+import { v1Router } from './api/v1/index.js';
+import { AppError } from './lib/errors.js';
 import { closeAllPools } from '@crm/db';
 
 const app = Fastify({
@@ -10,8 +12,22 @@ const app = Fastify({
   },
 });
 
-app.register(analyticsRoutes);
+app.setErrorHandler((error, request, reply) => {
+  if (error instanceof AppError) {
+    const level = error.statusCode >= 500 ? 'error' : 'warn';
+    app.log[level]({ err: error, path: request.url }, error.message);
+    const body: Record<string, unknown> = { success: false, error: error.message };
+    if (error.details !== undefined) body['details'] = error.details;
+    return reply.status(error.statusCode).send(body);
+  }
+  if (error instanceof ZodError) {
+    return reply.status(422).send({ success: false, error: 'Validation failed', details: error.flatten().fieldErrors });
+  }
+  app.log.error({ err: error, path: request.url }, 'Unhandled error');
+  return reply.status(500).send({ success: false, error: 'Internal server error' });
+});
 
+app.register(v1Router, { prefix: '/api/v1' });
 app.get('/health', async () => ({ status: 'ok', service: 'analytics-service' }));
 
 const start = async () => {

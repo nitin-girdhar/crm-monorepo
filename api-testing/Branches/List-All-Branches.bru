@@ -1,0 +1,15 @@
+meta {
+  name: List All Branches
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/branches/all
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: auth_token={{authToken}}
+}

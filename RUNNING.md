@@ -10,15 +10,20 @@ in Docker.
 
 ```
 Browser
-  └─► Next.js Web App   (port 3000)
-        └─► API Gateway  (port 4000)  ← single public entry point
-              ├─► Auth Service         (port 4001)
-              ├─► Users Service        (port 4002)
-              ├─► Leads Service        (port 4003)
-              ├─► Assignments Service  (port 4004)
-              ├─► Analytics Service    (port 4005)
-              └─► Activities Service   (port 4006)
-                    └─► PostgreSQL     (port 5432)
+  └─► Next.js Web App        (port 3000)
+        └─► API Gateway       (port 4000)  ← single public entry point
+              ├─► Auth Service             (port 4001)
+              ├─► Users Service            (port 4002)
+              ├─► Leads Service            (port 4003)
+              ├─► Assignments Service      (port 4004)
+              ├─► Analytics Service        (port 4005)
+              ├─► Activities Service       (port 4006)
+              └─► Meta Conversion API      (port 4007)
+                    └─► PostgreSQL          (port 5432)
+
+Meta (Facebook)
+  └─► API Gateway  /meta/webhook/:integrationId  (public, no JWT)
+        └─► Meta Conversion API (HMAC-verified per org)
 ```
 
 **Key rules:**
@@ -30,6 +35,9 @@ Browser
   Row-Level Security (RLS) and per-request GUC variables.
 - The **Activities Service** is called by other services internally to log audit
   events. It is not proxied by the Gateway.
+- The **Meta Conversion API** handles bidirectional Meta Lead Ads integration:
+  inbound webhook lead sync and outbound CAPI conversion events. Public webhook
+  endpoints use HMAC-SHA256 verification (per-org secrets) instead of JWT.
 
 ---
 
@@ -39,7 +47,7 @@ Browser
 |------|----------------|
 | Node.js | 20.x |
 | pnpm | 9.x |
-| PostgreSQL | 15 or 16 |
+| PostgreSQL | 15+ (18.4 recommended) |
 
 Install pnpm globally if you don't have it:
 ```
@@ -67,16 +75,33 @@ copy .env.example .env       # Windows
 cp .env.example .env          # Mac / Linux
 ```
 
+The root `.env` is the **single source of truth**. It contains database
+connection components, composed `DATABASE_URL*` strings, shared secrets, and
+service ports. Both `pnpm dev` (local) and `docker compose` read from it.
+
 Open `.env` and update at minimum:
 
 ```env
-# Point to your PostgreSQL instance
-DATABASE_URL=postgres://postgres:postgres@localhost:5432/crm
-DATABASE_URL_TENANT=postgres://postgres:postgres@localhost:5432/crm
-DATABASE_URL_SERVICE=postgres://postgres:postgres@localhost:5432/crm
+# Database connection components (docker-compose reads these directly)
+DB_NAME=crm
+DB_HOST=localhost
+DB_PORT=5432
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=Passw0rd
+
+# Composed URLs for local dev (services outside Docker)
+DATABASE_URL=postgres://lead_svc:LeadSvc_Dev2025@localhost:5432/crm
+DATABASE_URL_TENANT=postgres://tenant_dash_svc:TenantSvc_Dev2025@localhost:5432/crm
+DATABASE_URL_SERVICE=postgres://crm_service:CrmSvc_Dev2025@localhost:5432/crm
 
 # Must be the same across every service — use a long random string
 JWT_SECRET=change-me-to-a-long-random-string-at-least-64-chars
+
+# Inter-service authentication — gateway injects this, services reject without it
+INTERNAL_SERVICE_SECRET=change-me-to-another-long-random-string
+
+# API key for the intake webhook endpoint (pre-shared with ad platform integrations)
+WEBHOOK_API_KEY=change-me-webhook-key
 
 # Next.js calls the gateway at this URL
 NEXT_PUBLIC_API_URL=http://localhost:4000
@@ -84,13 +109,31 @@ NEXT_PUBLIC_API_URL=http://localhost:4000
 
 Everything else (ports, service URLs) can stay as-is for local development.
 
+### Per-service .env files (optional)
+
+Each service also has a `.env.example` documenting exactly what it needs. If you
+want to run a single service in isolation (outside the monorepo dev workflow),
+generate per-service `.env` files:
+
+```
+make setup-env
+```
+
+This reads the root `.env` and writes a scoped `.env` into each
+`services/<name>/` directory. Then run the service with:
+
+```
+cd services/leads-service
+pnpm dev:local            # loads ./services/leads-service/.env
+```
+
 ---
 
 ## Step 3 — Initialise the database
 
 ### Option A — PostgreSQL running in Docker (fresh container)
 
-The `docker-compose.yml` mounts `scripts/init-db.sql` into
+The `docker-compose.yml` mounts `db_scripts/01_init-db.sql` into
 `/docker-entrypoint-initdb.d/` so the schema is applied automatically on first
 start:
 
@@ -103,15 +146,28 @@ docker compose up postgres -d --wait
 Apply the schema manually:
 
 ```
-psql -U postgres -h localhost -p 5432 -d crm -f scripts/init-db.sql
+psql -U postgres -h localhost -p 5432 -d crm -f db_scripts/01_init-db.sql
 ```
 
 If the `crm` database doesn't exist yet, create it first:
 
 ```
 psql -U postgres -h localhost -p 5432 -c "CREATE DATABASE crm;"
-psql -U postgres -h localhost -p 5432 -d crm -f scripts/init-db.sql
+psql -U postgres -h localhost -p 5432 -d crm -f db_scripts/01_init-db.sql
 ```
+
+### Seeding demo data
+
+After applying the schema, seed tenants, orgs, users, and leads:
+
+```
+psql -U postgres -h localhost -p 5432 -d crm -f db_scripts/02-seed-tenants-orgs-users.sql
+psql -U postgres -h localhost -p 5432 -d crm -f db_scripts/03-seed-leads-bulk.sql
+psql -U postgres -h localhost -p 5432 -d crm -f db_scripts/04-seed-interactions-followups.sql
+psql -U postgres -h localhost -p 5432 -d crm -f db_scripts/05-cleanup-seed-helpers.sql
+```
+
+Or use the Makefile shortcut: `make seed-admin && make seed-data`
 
 ---
 
@@ -132,23 +188,7 @@ pnpm turbo build
 
 ---
 
-## Step 5 — Seed the database
-
-Create the super-admin user and initial tenant:
-
-```
-pnpm tsx scripts/seed-admin.ts
-```
-
-Optionally seed demo data (orgs, users, campaigns, leads):
-
-```
-pnpm tsx scripts/seed-data.ts
-```
-
----
-
-## Step 6 — Run services in development mode
+## Step 5 — Run services in development mode
 
 Each service uses `tsx watch` which gives TypeScript hot-reload without a
 separate compile step.
@@ -160,11 +200,12 @@ pnpm turbo dev --concurrency 16
 ```
 
 Turbo starts all services and the web app in parallel, respects the dependency
-graph, and streams colour-coded logs from every process.
+graph, and streams colour-coded logs from every process. Each service loads the
+root `.env` via `tsx --env-file ../../.env`.
 
 ### Option B — Run each service in a separate terminal
 
-Open 8 terminals, one per process (order matters — start services before gateway,
+Open 9 terminals, one per process (order matters — start services before gateway,
 gateway before web):
 
 **Terminal 1 — Auth Service**
@@ -203,19 +244,35 @@ cd services/activities-service
 pnpm dev
 ```
 
-**Terminal 7 — API Gateway** (start after all services above are listening)
+**Terminal 7 — Meta Conversion API**
+```
+cd services/meta-conversion-api
+pnpm dev
+```
+
+**Terminal 8 — API Gateway** (start after all services above are listening)
 ```
 cd services/api-gateway
 pnpm dev
 ```
 
-**Terminal 8 — Web App**
+**Terminal 9 — Web App**
 ```
 cd apps/web
 pnpm dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+### Option C — Run a single service in isolation
+
+Generate per-service `.env` files first, then use `dev:local`:
+
+```
+make setup-env
+cd services/leads-service
+pnpm dev:local
+```
 
 ### Health check endpoints
 
@@ -229,12 +286,13 @@ curl http://localhost:4003/health   # leads
 curl http://localhost:4004/health   # assignments
 curl http://localhost:4005/health   # analytics
 curl http://localhost:4006/health   # activities
+curl http://localhost:4007/health   # meta-conversion-api
 curl http://localhost:4000/health   # gateway
 ```
 
 ---
 
-## Step 7 — Run in production mode
+## Step 6 — Run in production mode
 
 Build all packages and services to `dist/`:
 
@@ -252,6 +310,7 @@ node services/leads-service/dist/server.js
 node services/assignments-service/dist/server.js
 node services/analytics-service/dist/server.js
 node services/activities-service/dist/server.js
+node services/meta-conversion-api/dist/server.js
 node services/api-gateway/dist/server.js
 ```
 
@@ -278,8 +337,34 @@ pnpm turbo clean
 Remove compiled output **and** `node_modules`:
 
 ```
-pnpm turbo clean
-node -e "require('fs').rmSync('node_modules', {recursive:true, force:true})"
+make clean-all
+```
+
+---
+
+## Environment variable flow
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  LOCAL DEV (all services via turbo)                         │
+│  pnpm dev → tsx --env-file ../../.env                       │
+│  Change DB? → edit root .env only                           │
+├─────────────────────────────────────────────────────────────┤
+│  LOCAL DEV (single service isolation)                       │
+│  make setup-env → generates per-service .env                │
+│  cd services/x && pnpm dev:local → reads ./.env             │
+│  Change DB? → edit root .env, re-run make setup-env         │
+├─────────────────────────────────────────────────────────────┤
+│  DOCKER COMPOSE                                             │
+│  docker compose up                                          │
+│  Reads root .env for ${VAR} interpolation                   │
+│  Builds DATABASE_URL from components (DB_NAME, etc.)        │
+│  Host = container name (crm-db-server), not localhost        │
+│  Change DB? → edit root .env only                           │
+├─────────────────────────────────────────────────────────────┤
+│  PRODUCTION (K8s / ECS / etc.)                              │
+│  No .env files — platform injects env vars                  │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -291,23 +376,28 @@ If you already have a PostgreSQL container running (not from this project's
 
 ### 1 — Update `.env`
 
-Point the three `DATABASE_URL*` variables at your container. Replace `localhost`
-with `host.docker.internal` if your container is inside Docker and you are
-running services on the host, or use the container's IP / network alias:
+Update the `DB_*` component vars and the composed `DATABASE_URL*` strings to
+point at your instance:
 
 ```env
-DATABASE_URL=postgres://<user>:<password>@<host>:<port>/crm
-DATABASE_URL_TENANT=postgres://<user>:<password>@<host>:<port>/crm
-DATABASE_URL_SERVICE=postgres://<user>:<password>@<host>:<port>/crm
+DB_NAME=crm
+DB_HOST=localhost
+DB_PORT=5432
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=YourPassword
+
+DATABASE_URL=postgres://lead_svc:LeadSvc_Dev2025@localhost:5432/crm
+DATABASE_URL_TENANT=postgres://tenant_dash_svc:TenantSvc_Dev2025@localhost:5432/crm
+DATABASE_URL_SERVICE=postgres://crm_service:CrmSvc_Dev2025@localhost:5432/crm
 ```
 
 ### 2 — Apply the schema manually
 
-Your existing container won't pick up `init-db.sql` automatically (that only
+Your existing container won't pick up `01_init-db.sql` automatically (that only
 runs on a fresh Docker volume). Apply it yourself:
 
 ```
-psql -U <user> -h <host> -p <port> -d crm -f scripts/init-db.sql
+psql -U postgres -h localhost -p 5432 -d crm -f db_scripts/01_init-db.sql
 ```
 
 ### Makefile change — skip the `postgres` service

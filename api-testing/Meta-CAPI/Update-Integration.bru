@@ -1,0 +1,27 @@
+meta {
+  name: Update Meta Integration
+  type: http
+  seq: 3
+}
+
+patch {
+  url: {{baseUrl}}/meta/integration
+  body: json
+  auth: none
+}
+
+headers {
+  Cookie: auth_token={{authToken}}
+}
+
+body:json {
+  {
+    "app_secret": "updated-app-secret",
+    "verify_token": "updated-verify-token",
+    "pixel_id": "updated-pixel-id",
+    "access_token": "updated-access-token",
+    "graph_api_version": "v21.0",
+    "is_active": true,
+    "capi_trigger_stages": []
+  }
+}

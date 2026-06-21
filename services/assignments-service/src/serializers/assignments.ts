@@ -10,7 +10,7 @@ export function toAssignmentView(row: Record<string, unknown>): Record<string, u
     lead_name:              row['lead_full_name'] ? String(row['lead_full_name']) : null,
     lead_phone:             row['lead_phone'] ? String(row['lead_phone']) : null,
     lead_email:             row['lead_email'] ? String(row['lead_email']) : null,
-    lead_stage:             row['lead_stage'] ? String(row['lead_stage']) : null,
+    crm.lead_stage:             row['crm.lead_stage'] ? String(row['crm.lead_stage']) : null,
     org_id:                 String(row['org_id'] ?? ''),
     assigned_at:            row['assigned_at'] ? String(row['assigned_at']) : null,
     assigned_by:            null,

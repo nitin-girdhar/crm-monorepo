@@ -4,5 +4,16 @@
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": [
+    "src/routes",
+    "src/serializers",
+    "src/events",
+    "src/config.ts",
+    "src/activity-logger.ts",
+    "src/db-user.ts",
+    "src/jwt.ts",
+    "src/password.ts",
+    "src/cookies.ts"
+  ]
 }

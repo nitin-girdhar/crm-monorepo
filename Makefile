@@ -3,7 +3,8 @@
 # ── Variables ──────────────────────────────────────────────────────────────────
 COMPOSE := docker compose
 PNPM    := pnpm
-DB_URL  ?= postgres://postgres:postgres@localhost:5432/crm
+DB_NAME ?= crm
+DB_URL  ?= postgres://postgres:Passw0rd@localhost:5432/$(DB_NAME)
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -23,17 +24,33 @@ dev-services: install ## Start all backend services and the API gateway
 	$(PNPM) turbo dev --filter='!web' --concurrency 12
 
 # ── Database ───────────────────────────────────────────────────────────────────
-migrate: ## Run database migrations (db_scripts/init-db.sql)
-	psql $(DB_URL) -f db_scripts/init-db.sql
+# DB commands run psql inside the Postgres container (no local psql required).
+# Works with both docker-compose and standalone docker-run containers.
+DB_CONTAINER  ?= $(DB_CONTAINER_NAME)
+DB_CONTAINER_NAME ?= crm-db-server
+POSTGRES_USER ?= postgres
 
-seed-admin: ## Seed demo tenants, orgs, users, and leads (db_scripts/init-seed.sql)
-	psql $(DB_URL) -f db_scripts/init-seed.sql
+define run_sql
+	docker cp $(1) $(DB_CONTAINER):/tmp/$(notdir $(1))
+	docker exec $(DB_CONTAINER) psql -U $(POSTGRES_USER) -d $(DB_NAME) -f /tmp/$(notdir $(1))
+endef
 
-seed-data: ## Seed demo tenants, orgs, users, and leads (db_scripts/init-seed.sql)
-	psql $(DB_URL) -f db_scripts/init-seed.sql
+migrate: ## Run database schema (db_scripts/01_init-db.sql)
+	$(call run_sql,db_scripts/01_init-db.sql)
+
+seed-admin: ## Seed tenants, orgs, and users (db_scripts/02-seed-tenants-orgs-users.sql)
+	$(call run_sql,db_scripts/02-seed-tenants-orgs-users.sql)
+
+seed-data: ## Seed leads, interactions, and follow-ups (run after seed-admin)
+	$(call run_sql,db_scripts/03-seed-leads-bulk.sql)
+	$(call run_sql,db_scripts/04-seed-interactions-followups.sql)
+	$(call run_sql,db_scripts/05-cleanup-seed-helpers.sql)
 
 db-shell: ## Open a psql shell in the Postgres container
-	$(COMPOSE) exec postgres psql -U postgres -d crm
+	docker exec -it $(DB_CONTAINER) psql -U $(POSTGRES_USER) -d $(DB_NAME)
+
+setup-env: ## Generate per-service .env files from root .env
+	node scripts/setup-env.js
 
 # ── Build ──────────────────────────────────────────────────────────────────────
 build: install ## Build all packages and services

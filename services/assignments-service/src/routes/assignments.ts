@@ -58,7 +58,7 @@ export async function assignmentsRoutes(app: FastifyInstance): Promise<void> {
     const target_rank = Number(target_user['rank'] ?? 0);
     if (!canAssignToUser(user_rank, target_rank, user_id, String(target_user['id']))) {
       const reason = target_rank >= RANKS.ADMIN
-        ? 'Admin users cannot be lead assignees'
+        ? 'Admin iam.users cannot be lead assignees'
         : user_id === String(target_user['id'])
           ? 'You cannot assign a lead to yourself'
           : 'You cannot assign leads to a user with that role';

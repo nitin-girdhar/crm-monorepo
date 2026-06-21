@@ -13,12 +13,9 @@ export function useAllBranches() {
       try {
         const res = await fetch('/api/branches/all', { cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json() as unknown;
+        const json = await res.json() as { data?: unknown };
         if (cancelled) return;
-        // Gateway may return array directly or wrapped in { branches: [...] }
-        const list = Array.isArray(data)
-          ? data
-          : (data as Record<string, unknown>).branches ?? [];
+        const list = Array.isArray(json.data) ? json.data : [];
         setBranches(
           (Array.isArray(list) ? list : []).map((b) =>
             typeof b === 'string' ? b : (b as Record<string, unknown>).name as string ?? '',

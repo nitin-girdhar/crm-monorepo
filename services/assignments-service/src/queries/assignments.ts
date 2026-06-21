@@ -16,11 +16,11 @@ const ASSIGNMENT_SELECT = `
     ls.name             AS lead_stage,
     ml.updated_at       AS assigned_at,
     COUNT(*) OVER ()    AS total_count
-  FROM marketing_leads ml
-  JOIN organizations o ON o.id = ml.org_id
-  JOIN lead_stage ls ON ls.id = ml.stage_id
-  JOIN users u ON u.id = ml.assigned_user_id
-  LEFT JOIN user_roles ur ON ur.id = u.role_id
+  FROM crm.marketing_leads ml
+  JOIN entity.organizations o ON o.id = ml.org_id
+  JOIN crm.lead_stage ls ON ls.id = ml.stage_id
+  JOIN iam.users u ON u.id = ml.assigned_user_id
+  LEFT JOIN iam.user_roles ur ON ur.id = u.role_id
   WHERE NOT ml.is_deleted
     AND ml.assigned_user_id IS NOT NULL
 `;
@@ -61,11 +61,11 @@ export async function getAssignmentById(id: string) {
          ur.name AS assigned_rep_role,
          ml.full_name AS lead_full_name, ml.phone AS lead_phone, ml.email AS lead_email,
          ml.org_id, ls.name AS lead_stage, ml.updated_at AS assigned_at
-       FROM marketing_leads ml
-       JOIN organizations o ON o.id = ml.org_id
-       JOIN lead_stage ls ON ls.id = ml.stage_id
-       JOIN users u ON u.id = ml.assigned_user_id
-       LEFT JOIN user_roles ur ON ur.id = u.role_id
+       FROM crm.marketing_leads ml
+       JOIN entity.organizations o ON o.id = ml.org_id
+       JOIN crm.lead_stage ls ON ls.id = ml.stage_id
+       JOIN iam.users u ON u.id = ml.assigned_user_id
+       LEFT JOIN iam.user_roles ur ON ur.id = u.role_id
        WHERE NOT ml.is_deleted AND ml.assigned_user_id IS NOT NULL AND ml.id = $1`,
       [id],
     );
@@ -88,15 +88,15 @@ export async function listMyAssignments(user_id: string, org_id: string, page = 
 }
 
 export async function getUserByIdForAssignment(org_id: string, actor_user_id: string, user_id: string) {
-  // Must use withOrgTx so the app_user RLS policy on the users table is active.
+  // Must use withOrgTx so the app_user RLS policy on the iam.users table is active.
   // withServiceTx runs without a role switch, leaving no matching policy under
-  // FORCE ROW LEVEL SECURITY → zero rows returned even for valid users.
+  // FORCE ROW LEVEL SECURITY → zero rows returned even for valid iam.users.
   return withOrgTx(org_id, actor_user_id, async (tx) => {
     const rows = await tx.unsafe(
       `SELECT u.id, u.full_name, u.email, u.is_active, u.is_deleted,
               ur.rank, ur.name AS role_name
-       FROM users u
-       JOIN user_roles ur ON ur.id = u.role_id
+       FROM iam.users u
+       JOIN iam.user_roles ur ON ur.id = u.role_id
        WHERE u.id = $1 AND NOT u.is_deleted`,
       [user_id],
     );

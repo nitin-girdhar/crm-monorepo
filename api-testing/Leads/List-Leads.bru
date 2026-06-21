@@ -1,0 +1,24 @@
+meta {
+  name: List Leads
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/leads?page=1&page_size=20
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: auth_token={{authToken}}
+}
+
+params:query {
+  page: 1
+  page_size: 20
+  ~status: new
+  ~search: John
+  ~assigned_user_id:
+  ~platforms: facebook,google
+}

@@ -1,0 +1,23 @@
+meta {
+  name: Auto-Trigger CAPI Event (Stage Change)
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/meta/capi/auto-trigger
+  body: json
+  auth: none
+}
+
+headers {
+  Cookie: auth_token={{authToken}}
+}
+
+body:json {
+  {
+    "marketingLeadId": "{{leadId}}",
+    "orgId": "{{orgId}}",
+    "newStageId": "{{stageId}}"
+  }
+}

@@ -9,6 +9,11 @@
       "types": "./dist/index.d.ts",
       "require": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./schema": {
+      "types": "./dist/schema/index.d.ts",
+      "require": "./dist/schema/index.js",
+      "default": "./dist/schema/index.js"
     }
   },
   "scripts": {
@@ -18,6 +23,7 @@
     "clean": "rimraf dist"
   },
   "dependencies": {
+    "drizzle-orm": "^0.44.0",
     "postgres": "^3.4.4"
   },
   "devDependencies": {

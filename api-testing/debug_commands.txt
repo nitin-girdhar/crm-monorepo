@@ -1,0 +1,36 @@
+# See all running docker containers
+docker compose ps
+
+# See logs for a specific service
+docker compose logs auth-service --tail 50 -f
+
+# See which ports are listening (Windows)
+netstat -ano | findstr "400"
+netstat -ano | findstr /R ":400[0-7].*LISTENING"
+
+# Kill it by PID
+taskkill /PID 22508 /F
+
+(netstat -ano | findstr ":4000.*LISTENING") -match '\d+$'; taskkill /PID $Matches[0] /F
+
+
+# Check if gateway is responding
+curl http://localhost:4000/health
+
+# Check individual services
+curl http://localhost:4001/health   # auth
+curl http://localhost:4002/health   # users
+curl http://localhost:4003/health   # leads
+curl http://localhost:4004/health   # assignments
+curl http://localhost:4005/health   # analytics
+curl http://localhost:4006/health   # activities
+curl http://localhost:4007/health   # meta-conversion-api
+
+# Restart a single service
+docker compose restart auth-service
+
+# Rebuild and restart everything
+docker compose up --build -d
+
+# View all container logs
+docker compose logs -f --tail 100

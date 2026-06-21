@@ -19,7 +19,7 @@ export async function createLead(
   const ctx: RoleTxContext = { role, org_id, tenant_id, user_id };
   return withRoleTx(ctx, async (tx) => {
     const stage_rows = await tx.unsafe(
-      `SELECT id FROM lead_stage WHERE name = 'new' LIMIT 1`,
+      `SELECT id FROM crm.lead_stage WHERE name = 'new' LIMIT 1`,
     );
     const stage_row = (stage_rows as unknown as Array<{ id: string }>)[0];
     if (!stage_row) throw new Error('Lead stage "new" not found');
@@ -28,7 +28,7 @@ export async function createLead(
 
     if (data.phone) {
       const existing = await tx.unsafe(
-        `SELECT id FROM marketing_leads
+        `SELECT id FROM crm.marketing_leads
          WHERE org_id = $1 AND phone = $2 AND NOT is_deleted
          ORDER BY created_at ASC LIMIT 1`,
         [org_id, data.phone],
@@ -39,7 +39,7 @@ export async function createLead(
 
     if (data.email && !duplicate_lead_id) {
       const existing = await tx.unsafe(
-        `SELECT id FROM marketing_leads
+        `SELECT id FROM crm.marketing_leads
          WHERE org_id = $1 AND email = $2 AND NOT is_deleted
          ORDER BY created_at ASC LIMIT 1`,
         [org_id, data.email],
@@ -51,7 +51,7 @@ export async function createLead(
     const tags = coerceTags(data.tags);
 
     const rows = await tx.unsafe(
-      `INSERT INTO marketing_leads
+      `INSERT INTO crm.marketing_leads
          (org_id, first_name, middle_name, last_name, phone, email, city,
           address_line1, address_line2, pincode,
           branch_id, source_id, campaign_id, stage_id, assigned_user_id, duplicate_lead_id,
@@ -100,7 +100,7 @@ export async function updateLead(
   return withRoleTx(ctx, async (tx) => {
     if (data.assigned_user_id !== undefined && data.assigned_user_id !== null) {
       const rows = await tx.unsafe(
-        `SELECT can_assign_to($1::uuid, $2::uuid, $3::uuid) AS allowed`,
+        `SELECT iam.can_assign_to($1::uuid, $2::uuid, $3::uuid) AS allowed`,
         [org_id, user_id, data.assigned_user_id],
       );
       const allowed = (rows as unknown as Array<{ allowed: boolean }>)[0];
@@ -149,7 +149,7 @@ export async function updateLead(
 
     params.push(lead_id, org_id);
     const update_rows = await tx.unsafe(
-      `UPDATE marketing_leads
+      `UPDATE crm.marketing_leads
        SET ${sets.join(', ')}
        WHERE id = $${params.length - 1} AND org_id = $${params.length} AND NOT is_deleted
        RETURNING id`,
@@ -160,7 +160,7 @@ export async function updateLead(
 
     if (data.note && data.note.trim()) {
       await tx.unsafe(
-        `INSERT INTO lead_interactions (org_id, lead_id, user_id, notes)
+        `INSERT INTO crm.lead_interactions (org_id, lead_id, user_id, notes)
          VALUES ($1, $2, $3, $4)`,
         [org_id, lead_id, user_id, data.note.trim()],
       );
@@ -180,7 +180,7 @@ export async function deleteLead(
   const ctx: RoleTxContext = { role, org_id, tenant_id, user_id };
   return withRoleTx(ctx, async (tx) => {
     await tx.unsafe(
-      `UPDATE marketing_leads
+      `UPDATE crm.marketing_leads
        SET is_deleted = TRUE, deleted_at = CLOCK_TIMESTAMP(), deleted_by = $1::uuid
        WHERE id = $2 AND org_id = $3`,
       [user_id, lead_id, org_id],
@@ -201,14 +201,14 @@ export async function createInteraction(
     let interaction_type_id: string | null = null;
     if (data.interaction_type_name) {
       const type_rows = await tx.unsafe(
-        `SELECT id FROM interaction_types WHERE name = $1 LIMIT 1`,
+        `SELECT id FROM crm.interaction_types WHERE name = $1 LIMIT 1`,
         [data.interaction_type_name],
       );
       interaction_type_id = (type_rows as unknown as Array<{ id: string }>)[0]?.id ?? null;
     }
 
     const rows = await tx.unsafe(
-      `INSERT INTO lead_interactions (org_id, lead_id, user_id, interaction_type_id, notes, occurred_at)
+      `INSERT INTO crm.lead_interactions (org_id, lead_id, user_id, interaction_type_id, notes, occurred_at)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id`,
       [

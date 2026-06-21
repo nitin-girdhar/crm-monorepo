@@ -1,52 +1,7 @@
-import postgres from 'postgres';
-import { appDb, tenantDb, serviceDb } from './client.js';
+import { sql } from 'drizzle-orm';
+import { appDrizzle, tenantDrizzle, serviceDrizzle, type DrizzleTx } from './drizzle.js';
 
-export type Tx = postgres.TransactionSql;
-// Derives the params array type accepted by tx.unsafe() without importing postgres directly in services.
-export type SqlParams = NonNullable<Parameters<Tx['unsafe']>[1]>;
-type TxFn<T> = (tx: Tx) => Promise<T>;
-
-export async function withOrgTx<T>(
-  org_id: string,
-  user_id: string,
-  fn: TxFn<T>,
-): Promise<T> {
-  // postgres.begin() returns UnwrapPromiseArray<T>; cast needed because T will never be an array
-  return appDb().begin(async (tx) => {
-    await tx.unsafe(`SET LOCAL ROLE app_user`);
-    await tx.unsafe(`SELECT set_config('app.current_org_id', $1, true)`, [org_id]);
-    await tx.unsafe(`SELECT set_config('app.current_user_id', $1, true)`, [user_id]);
-    return fn(tx);
-  }) as unknown as Promise<T>;
-}
-
-export async function withTenantTx<T>(
-  tenant_id: string,
-  user_id: string,
-  fn: TxFn<T>,
-): Promise<T> {
-  return tenantDb().begin(async (tx) => {
-    await tx.unsafe(`SET LOCAL ROLE tenant_admin`);
-    await tx.unsafe(`SELECT set_config('app.current_tenant_id', $1, true)`, [tenant_id]);
-    await tx.unsafe(`SELECT set_config('app.current_user_id', $1, true)`, [user_id]);
-    return fn(tx);
-  }) as unknown as Promise<T>;
-}
-
-export async function withServiceTx<T>(fn: TxFn<T>): Promise<T> {
-  return serviceDb().begin(async (tx) => {
-    return fn(tx);
-  }) as unknown as Promise<T>;
-}
-
-// ── Role-aware transaction wrapper ────────────────────────────────────────────
-// Maps the application user role to the correct PostgreSQL role + connection:
-//   super_admin   → crm_service  (BYPASSRLS, serviceDb; sets user_id for audit)
-//   tenant_admin  → tenant_admin (tenant-scoped RLS, tenantDb)
-//   everyone else → app_user     (org-scoped RLS, appDb)
-//
-// Always prefer withRoleTx over calling withOrgTx/withTenantTx/withServiceTx
-// directly in service code — it ensures the DB role matches the app role.
+export type { DrizzleTx };
 
 export interface RoleTxContext {
   role: string;
@@ -55,16 +10,35 @@ export interface RoleTxContext {
   user_id: string;
 }
 
-export async function withRoleTx<T>(ctx: RoleTxContext, fn: TxFn<T>): Promise<T> {
+export async function withRoleTx<T>(ctx: RoleTxContext, fn: (tx: DrizzleTx) => Promise<T>): Promise<T> {
   if (ctx.role === 'super_admin') {
-    // crm_service has BYPASSRLS; still set user_id so audit triggers capture the actor.
-    return serviceDb().begin(async (tx) => {
-      await tx.unsafe(`SELECT set_config('app.current_user_id', $1, true)`, [ctx.user_id]);
+    return serviceDrizzle().transaction(async (tx) => {
+      await tx.execute(sql`SELECT set_config('app.current_user_id', ${ctx.user_id}, true)`);
+      if (ctx.org_id) await tx.execute(sql`SELECT set_config('app.current_org_id', ${ctx.org_id}, true)`);
+      if (ctx.tenant_id) await tx.execute(sql`SELECT set_config('app.current_tenant_id', ${ctx.tenant_id}, true)`);
       return fn(tx);
-    }) as unknown as Promise<T>;
+    });
   }
   if (ctx.role === 'tenant_admin') {
-    return withTenantTx(ctx.tenant_id, ctx.user_id, fn);
+    return tenantDrizzle().transaction(async (tx) => {
+      await tx.execute(sql.raw(`SET LOCAL ROLE tenant_admin`));
+      await tx.execute(sql`SELECT set_config('app.current_tenant_id', ${ctx.tenant_id}, true)`);
+      await tx.execute(sql`SELECT set_config('app.current_user_id', ${ctx.user_id}, true)`);
+      // Set org_id so audit triggers and any org-scoped policy checks have context.
+      // For tenant_admin the tenant_isolation_policy already governs cross-org access;
+      // this does not restrict them to a single org.
+      await tx.execute(sql`SELECT set_config('app.current_org_id', ${ctx.org_id}, true)`);
+      return fn(tx);
+    });
   }
-  return withOrgTx(ctx.org_id, ctx.user_id, fn);
+  return appDrizzle().transaction(async (tx) => {
+    await tx.execute(sql.raw(`SET LOCAL ROLE app_user`));
+    await tx.execute(sql`SELECT set_config('app.current_org_id', ${ctx.org_id}, true)`);
+    await tx.execute(sql`SELECT set_config('app.current_user_id', ${ctx.user_id}, true)`);
+    return fn(tx);
+  });
+}
+
+export async function withServiceTx<T>(fn: (tx: DrizzleTx) => Promise<T>): Promise<T> {
+  return serviceDrizzle().transaction(fn);
 }

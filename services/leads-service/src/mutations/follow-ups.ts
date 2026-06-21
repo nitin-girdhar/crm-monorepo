@@ -16,7 +16,7 @@ export async function createFollowUp(
   const ctx: RoleTxContext = { role, org_id, tenant_id, user_id };
   return withRoleTx(ctx, async (tx) => {
     const rows = await tx.unsafe(
-      `INSERT INTO lead_follow_ups (org_id, lead_id, assigned_user_id, scheduled_at, notes)
+      `INSERT INTO crm.lead_follow_ups (org_id, lead_id, assigned_user_id, scheduled_at, notes)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING id`,
       [org_id, lead_id, data.assigned_user_id ?? user_id, data.scheduled_at, data.notes ?? null],
@@ -49,7 +49,7 @@ export async function updateFollowUp(
 
     if (data.status_name !== undefined) {
       const status_rows = await tx.unsafe(
-        `SELECT id FROM follow_up_statuses WHERE name = $1 LIMIT 1`,
+        `SELECT id FROM crm.follow_up_statuses WHERE name = $1 LIMIT 1`,
         [data.status_name],
       );
       const status_id = (status_rows as unknown as Array<{ id: string }>)[0]?.id;
@@ -61,7 +61,7 @@ export async function updateFollowUp(
 
     params.push(follow_up_id, org_id);
     const rows = await tx.unsafe(
-      `UPDATE lead_follow_ups SET ${sets.join(', ')}
+      `UPDATE crm.lead_follow_ups SET ${sets.join(', ')}
        WHERE id = $${params.length - 1} AND org_id = $${params.length} AND NOT is_deleted
        RETURNING id`,
       params as unknown as SqlParams,
@@ -80,7 +80,7 @@ export async function deleteFollowUp(
   const ctx: RoleTxContext = { role, org_id, tenant_id, user_id };
   return withRoleTx(ctx, async (tx) => {
     await tx.unsafe(
-      `UPDATE lead_follow_ups
+      `UPDATE crm.lead_follow_ups
        SET is_deleted = TRUE, deleted_at = CLOCK_TIMESTAMP(), deleted_by = $1::uuid
        WHERE id = $2 AND org_id = $3`,
       [user_id, follow_up_id, org_id],

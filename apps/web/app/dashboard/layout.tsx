@@ -9,14 +9,21 @@ import SidebarController from '@/components/dashboard/SidebarController';
 
 export const dynamic = 'force-dynamic';
 
-const API_GATEWAY = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:4000';
+// API_GATEWAY_INTERNAL_URL is a server-only env var (no NEXT_PUBLIC_ prefix).
+// It is never sent to the browser.
+const API_GATEWAY = process.env['API_GATEWAY_INTERNAL_URL'] ?? 'http://localhost:4000';
 
 async function getJwtPayload(): Promise<JwtPayload | null> {
+  const jwtSecret = process.env['JWT_SECRET'];
+  if (!jwtSecret) {
+    throw new Error('JWT_SECRET environment variable is not set');
+  }
+
   const cookieStore = await cookies();
   const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
   if (!token) return null;
   try {
-    const secret = new TextEncoder().encode(process.env['JWT_SECRET']);
+    const secret = new TextEncoder().encode(jwtSecret);
     const { payload } = await jwtVerify(token, secret, {
       algorithms: ['HS256'],
       issuer: JWT_ISSUER,
@@ -35,8 +42,8 @@ async function getFullSession(cookieHeader: string): Promise<SessionUser | null>
       cache: 'no-store',
     });
     if (!res.ok) return null;
-    const data = await res.json() as { user: SessionUser };
-    return data.user;
+    const data = await res.json() as { data: { user: SessionUser } };
+    return data.data.user;
   } catch {
     return null;
   }

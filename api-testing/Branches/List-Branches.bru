@@ -1,0 +1,21 @@
+meta {
+  name: List Branches (Filtered)
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/branches
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: auth_token={{authToken}}
+}
+
+params:query {
+  ~cityIds:
+  ~stateIds:
+  ~countryIds:
+}

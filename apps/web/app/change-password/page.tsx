@@ -33,8 +33,8 @@ async function getSession(): Promise<SessionUser | null> {
       cache: 'no-store',
     });
     if (!res.ok) return null;
-    const data = await res.json() as { user: SessionUser };
-    return data.user;
+    const data = await res.json() as { data: { user: SessionUser } };
+    return data.data.user;
   } catch {
     return null;
   }

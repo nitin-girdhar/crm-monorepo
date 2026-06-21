@@ -5,6 +5,9 @@ import type { LeadView } from '@crm/types';
 import type { UpdatePayload, StageOption, StageOutcome } from '@/src/types/leads';
 import { leads as leadsApi } from '@/src/lib/api/client';
 
+export const DEFAULT_PAGE_SIZE = 5000;
+export const MAX_PAGE_SIZE = 5000;
+
 function sortNewestFirst(list: LeadView[]): LeadView[] {
   return [...list].sort((a, b) => {
     const da = a.created_at ? new Date(a.created_at).getTime() : 0;
@@ -18,6 +21,10 @@ interface UseLeadsReturn {
   stats: { total: number; lastUpdated: Date | null; serverTotal: number };
   loading: boolean;
   error: string | null;
+  page: number;
+  pageSize: number;
+  setPage: (page: number) => void;
+  setPageSize: (size: number) => void;
   statusOptions: string[];
   statusLabelMap: Record<string, string>;
   requiresFollowupStatuses: string[];
@@ -34,6 +41,8 @@ export function useLeads(orgIds?: string[], platforms?: string[]): UseLeadsRetur
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [page, setPage]             = useState(1);
+  const [pageSize, setPageSize]     = useState(DEFAULT_PAGE_SIZE);
   const [statusOptions, setStatusOptions]           = useState<string[]>([]);
   const [statusLabelMap, setStatusLabelMap]         = useState<Record<string, string>>({});
   const [requiresFollowupStatuses, setRequiresFollowup] = useState<string[]>([]);
@@ -43,14 +52,18 @@ export function useLeads(orgIds?: string[], platforms?: string[]): UseLeadsRetur
 
   const orgIdsRef        = useRef(orgIds);
   const platformsRef     = useRef(platforms);
+  const pageRef          = useRef(page);
+  const pageSizeRef      = useRef(pageSize);
   const stageNameToIdRef = useRef<Record<string, string>>({});
   orgIdsRef.current    = orgIds;
   platformsRef.current = platforms;
+  pageRef.current      = page;
+  pageSizeRef.current  = pageSize;
 
   const fetchData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const ids  = orgIdsRef.current;
+      const ids   = orgIdsRef.current;
       const plats = platformsRef.current;
 
       // Empty array = location filter active but no branches match → show nothing
@@ -61,7 +74,10 @@ export function useLeads(orgIds?: string[], platforms?: string[]): UseLeadsRetur
         return;
       }
 
-      const params: Parameters<typeof leadsApi.list>[0] = { page_size: 500 };
+      const params: Parameters<typeof leadsApi.list>[0] = {
+        page: pageRef.current,
+        page_size: Math.min(pageSizeRef.current, MAX_PAGE_SIZE),
+      };
       if (ids?.length)   params.org_ids   = ids.join(',');
       if (plats?.length) params.platforms = plats.join(',');
       const data = await leadsApi.list(params);
@@ -91,8 +107,8 @@ export function useLeads(orgIds?: string[], platforms?: string[]): UseLeadsRetur
       setRejectionStatuses(rejected);
       setStageOutcomes(rawOutcomes);
       setStageIdToName(idToName);
-      setLeads(sortNewestFirst(data.leads));
-      setServerTotal(typeof data.total === 'number' ? data.total : data.leads.length);
+      setLeads(sortNewestFirst(data.data));
+      setServerTotal(typeof data.total === 'number' ? data.total : data.data.length);
       setLastUpdated(new Date());
       setError(null);
     } catch (err) {
@@ -102,22 +118,30 @@ export function useLeads(orgIds?: string[], platforms?: string[]): UseLeadsRetur
     }
   }, []);
 
+  const orgIdsKey    = orgIds?.join(',') ?? '';
+  const platformsKey = platforms?.join(',') ?? '';
+
+  // Reset to page 1 whenever filters change
+  useEffect(() => {
+    setPage(1);
+  }, [orgIdsKey, platformsKey]);
+
   useEffect(() => {
     setLeads([]);
     setLoading(true);
     setLastUpdated(null);
     fetchData(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orgIds?.join(','), platforms?.join(','), fetchData]);
+  }, [orgIdsKey, platformsKey, page, pageSize, fetchData]);
 
   const updateLead = useCallback(
     async (payload: UpdatePayload) => {
       setLeads((prev) =>
-        prev.map((l) =>
-          l.lead_id === payload.leadId
-            ? { ...l, ...(payload.field === 'stage' ? { stage: payload.value } : { metadata: { ...l.metadata, remarks: payload.value } }) }
-            : l,
-        ),
+        prev.map((l) => {
+          if (l.lead_id !== payload.leadId) return l;
+          if (payload.field === 'stage') return { ...l, stage: payload.value };
+          if (payload.field === 'comments') return { ...l, metadata: { ...l.metadata, remarks: payload.value } };
+          return l;
+        }),
       );
 
       const patchData: Record<string, unknown> = {};
@@ -155,6 +179,10 @@ export function useLeads(orgIds?: string[], platforms?: string[]): UseLeadsRetur
     stats: { total: leads.length, lastUpdated, serverTotal },
     loading,
     error,
+    page,
+    pageSize,
+    setPage,
+    setPageSize,
     statusOptions,
     statusLabelMap,
     requiresFollowupStatuses,

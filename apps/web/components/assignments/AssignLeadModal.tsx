@@ -41,7 +41,7 @@ export default function AssignLeadModal({
   const [assignedTo, setAssignedTo] = useState(() =>
     validAssignedTo(existing?.assigned_to),
   );
-  const [notes, setNotes] = useState(existing?.notes ?? "");
+  const [notes, setNotes] = useState("");
 
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +56,7 @@ export default function AssignLeadModal({
     setEmail("");
     setBranchId("");
     setAssignedTo(validAssignedTo(existing?.assigned_to));
-    setNotes(existing?.notes ?? "");
+    setNotes("");
     setError(null);
     setPhoneError(null);
     setEmailError(null);
@@ -246,11 +246,11 @@ export default function AssignLeadModal({
                 className="rounded-xl border border-[#E2E8F0] bg-white px-3 py-2.5 text-sm text-[#0F172A] shadow-sm disabled:cursor-not-allowed disabled:bg-[#F8FAFC]"
               />
             </div>
-            {existing?.assignee_name && (
+            {existing?.assigned_rep_name && (
               <div className="rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
                 Current Owner:{" "}
-                <span className="font-semibold">{existing.assignee_name}</span>
-                {existing.assignee_email ? ` (${existing.assignee_email})` : ""}
+                <span className="font-semibold">{existing.assigned_rep_name}</span>
+                {existing.assigned_rep_email ? ` (${existing.assigned_rep_email})` : ""}
               </div>
             )}
           </>

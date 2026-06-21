@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 export interface LocationOption {
   id: number;
@@ -25,7 +26,17 @@ interface UseLocationFiltersReturn {
   loadingCities: boolean;
 }
 
+async function fetchLocations(url: string, router: ReturnType<typeof useRouter>): Promise<LocationOption[]> {
+  const r = await fetch(url, { cache: 'no-store' });
+  if (r.status === 401) { router.replace('/login'); return []; }
+  if (!r.ok) throw new Error(`Failed to load locations (${r.status})`);
+  const json = await r.json() as { data?: unknown };
+  return Array.isArray(json.data) ? (json.data as LocationOption[]) : [];
+}
+
 export function useLocationFilters(): UseLocationFiltersReturn {
+  const router = useRouter();
+
   const [countries, setCountries] = useState<LocationOption[]>([]);
   const [states, setStates]       = useState<LocationOption[]>([]);
   const [cities, setCities]       = useState<LocationOption[]>([]);
@@ -41,41 +52,36 @@ export function useLocationFilters(): UseLocationFiltersReturn {
   useEffect(() => {
     let cancelled = false;
     setLoadingCountries(true);
-    fetch('/api/locations?level=countries', { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((data) => { if (!cancelled) setCountries(Array.isArray(data) ? data : []); })
-      .catch(() => {})
+    fetchLocations('/api/locations?level=countries', router)
+      .then((data) => { if (!cancelled) setCountries(data); })
+      .catch(() => { if (!cancelled) setCountries([]); })
       .finally(() => { if (!cancelled) setLoadingCountries(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [router]);
 
   const countryKey = selectedCountries.map((c) => c.id).join(',');
   useEffect(() => {
-    if (!selectedCountries.length) { setStates([]); return; }
+    if (!countryKey) { setStates([]); return; }
     let cancelled = false;
     setLoadingStates(true);
-    fetch(`/api/locations?level=states&countryIds=${countryKey}`, { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((data) => { if (!cancelled) setStates(Array.isArray(data) ? data : []); })
-      .catch(() => {})
+    fetchLocations(`/api/locations?level=states&countryIds=${countryKey}`, router)
+      .then((data) => { if (!cancelled) setStates(data); })
+      .catch(() => { if (!cancelled) setStates([]); })
       .finally(() => { if (!cancelled) setLoadingStates(false); });
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [countryKey]);
+  }, [countryKey, router]);
 
   const stateKey = selectedStates.map((s) => s.id).join(',');
   useEffect(() => {
-    if (!selectedStates.length) { setCities([]); return; }
+    if (!stateKey) { setCities([]); return; }
     let cancelled = false;
     setLoadingCities(true);
-    fetch(`/api/locations?level=cities&stateIds=${stateKey}`, { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((data) => { if (!cancelled) setCities(Array.isArray(data) ? data : []); })
-      .catch(() => {})
+    fetchLocations(`/api/locations?level=cities&stateIds=${stateKey}`, router)
+      .then((data) => { if (!cancelled) setCities(data); })
+      .catch(() => { if (!cancelled) setCities([]); })
       .finally(() => { if (!cancelled) setLoadingCities(false); });
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stateKey]);
+  }, [stateKey, router]);
 
   const setSelectedCountries = useCallback((next: LocationOption[]) => {
     _setSelectedCountries(next);

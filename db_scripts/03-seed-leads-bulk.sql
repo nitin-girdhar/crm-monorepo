@@ -3,7 +3,7 @@
 -- CRM Monorepo — Bulk Demo Seed: STEP 3
 -- 500 Leads per org (5,000 total across 10 orgs)
 --
--- Run AFTER: init-db.sql, init-seed.sql, seed-02-tenants-orgs-users.sql
+-- Run AFTER: init-db.sql, init-seed.sql, seed-02-entity.tenants-orgs-iam.users.sql
 -- Run BEFORE: seed-04-interactions-followups.sql
 --
 -- Strategy:
@@ -21,7 +21,7 @@
 --   - metadata differs by tenant: fitness goals for FitClass orgs,
 --     stay preferences for ITC Hotels orgs.
 --   - outcome_id is only ever set to an outcome row matching the
---     lead's own stage_id, satisfying check_lead_stage_outcome().
+--     lead's own stage_id, satisfying crm.check_lead_stage_outcome().
 --   - outcome_comment is populated whenever the chosen outcome has
 --     requires_comment = TRUE, satisfying the same trigger.
 -- ===================================================================
@@ -137,7 +137,7 @@ BEGIN
 
     FOR v_i IN 1..500 LOOP
 
-      v_lead_id := gen_uuidv7();
+      v_lead_id := public.gen_uuidv7();
 
       -- ── Name ──
       v_name_idx := floor(random() * v_name_pool_sz)::INT;
@@ -152,9 +152,9 @@ BEGIN
       FROM _city_pool WHERE idx = v_city_idx;
 
       IF v_has_address THEN
-        SELECT id INTO v_lead_city_id    FROM cities    WHERE name = v_city_name  LIMIT 1;
-        SELECT id INTO v_lead_state_id   FROM states    WHERE name = v_state_name LIMIT 1;
-        SELECT id INTO v_lead_country_id FROM countries WHERE iso_code = 'IN';
+        SELECT id INTO v_lead_city_id    FROM geo.cities    WHERE name = v_city_name  LIMIT 1;
+        SELECT id INTO v_lead_state_id   FROM geo.states    WHERE name = v_state_name LIMIT 1;
+        SELECT id INTO v_lead_country_id FROM geo.countries WHERE iso_code = 'IN';
       ELSE
         v_lead_city_id    := NULL;
         v_lead_state_id   := NULL;
@@ -181,7 +181,7 @@ BEGIN
         WHEN v_stage_roll < 0.97 THEN 'unqualified'
         ELSE 'transferred_out'
       END;
-      SELECT id INTO v_stage_id FROM lead_stage WHERE name = v_stage_name;
+      SELECT id INTO v_stage_id FROM crm.lead_stage WHERE name = v_stage_name;
 
       -- ── Outcome: only for stages that have outcome rows defined,
       --     and only ~60% of the time even then (some leads sit in a
@@ -193,7 +193,7 @@ BEGIN
       IF v_stage_name IN ('contacting','qualified','converted','unqualified','transferred_out')
          AND random() < 0.60 THEN
         SELECT lso.id, lso.requires_comment INTO v_outcome_id, v_outcome_requires_comment
-        FROM lead_stage_outcome lso
+        FROM crm.lead_stage_outcome lso
         WHERE lso.stage_id = v_stage_id
         ORDER BY random() LIMIT 1;
 
@@ -210,12 +210,12 @@ BEGIN
       v_source_id   := NULL;
       IF v_platform_name IN ('facebook','google') THEN
         SELECT ac.id INTO v_campaign_id
-        FROM ad_campaigns ac
-        JOIN marketing_platforms mp ON mp.id = ac.platform_id
+        FROM marketing.ad_campaigns ac
+        JOIN marketing.marketing_platforms mp ON mp.id = ac.platform_id
         WHERE ac.org_id = v_org.org_uuid AND mp.name = v_platform_name
         ORDER BY random() LIMIT 1;
       ELSE
-        SELECT id INTO v_source_id FROM lead_sources WHERE name =
+        SELECT id INTO v_source_id FROM crm.lead_sources WHERE name =
           CASE v_platform_name
             WHEN 'whatsapp' THEN 'whatsapp'
             WHEN 'referral' THEN 'referral'
@@ -263,7 +263,7 @@ BEGIN
         ELSE        ARRAY['high_value','trial_requested']
       END;
 
-      INSERT INTO marketing_leads (
+      INSERT INTO crm.marketing_leads (
         id, org_id, first_name, last_name, phone, email,
         city_id, state_id, country_id,
         campaign_id, source_id, stage_id, outcome_id, outcome_comment,
@@ -287,11 +287,11 @@ COMMIT;
 -- Sanity check (run manually after this script if you want to verify)
 -- ============================================================
 -- SELECT o.name, COUNT(*) AS lead_count
--- FROM marketing_leads ml JOIN organizations o ON o.id = ml.org_id
+-- FROM crm.marketing_leads ml JOIN entity.organizations o ON o.id = ml.org_id
 -- WHERE ml.raw_webhook_data->>'seed_batch' = 'bulk_500'
 -- GROUP BY o.name ORDER BY o.name;
 --
--- SELECT ls.name AS stage, COUNT(*) FROM marketing_leads ml
--- JOIN lead_stage ls ON ls.id = ml.stage_id
+-- SELECT ls.name AS stage, COUNT(*) FROM crm.marketing_leads ml
+-- JOIN crm.lead_stage ls ON ls.id = ml.stage_id
 -- WHERE ml.raw_webhook_data->>'seed_batch' = 'bulk_500'
 -- GROUP BY ls.name ORDER BY COUNT(*) DESC;

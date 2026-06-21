@@ -4,5 +4,15 @@
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": [
+    "src/routes",
+    "src/mutations",
+    "src/queries",
+    "src/serializers",
+    "src/events",
+    "src/config.ts",
+    "src/activity-logger.ts",
+    "src/lib/auth-context.ts"
+  ]
 }

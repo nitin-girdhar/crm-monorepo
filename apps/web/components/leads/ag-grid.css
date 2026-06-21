@@ -1,0 +1,74 @@
+.ag-theme-alpine {
+  --ag-font-size: 13px;
+  --ag-font-family: ui-sans-serif, system-ui, sans-serif;
+  --ag-header-background-color: #F8FAFC;
+  --ag-header-foreground-color: #64748B;
+  --ag-border-color: #E2E8F0;
+  --ag-row-border-color: #F1F5F9;
+  --ag-row-hover-color: #F0F9FF;
+  --ag-selected-row-background-color: #EFF6FF;
+  --ag-odd-row-background-color: #FFFFFF;
+  --ag-background-color: #FFFFFF;
+  --ag-secondary-foreground-color: #64748B;
+  --ag-input-focus-border-color: #0A6BA8;
+  --ag-range-selection-border-color: #0A6BA8;
+  --ag-checkbox-checked-color: #0A6BA8;
+}
+
+.ag-theme-alpine .ag-header-cell-text {
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #64748B;
+}
+
+.ag-theme-alpine .ag-header-cell {
+  border-right: 1px solid #F1F5F9;
+}
+
+.ag-theme-alpine .ag-row {
+  border-bottom: 1px solid #F8FAFC;
+}
+
+.ag-theme-alpine .ag-paging-panel {
+  border-top: 1px solid #E2E8F0;
+  font-size: 12px;
+  color: #64748B;
+  background: #F8FAFC;
+  padding: 8px 16px;
+}
+
+.ag-theme-alpine .ag-body-viewport,
+.ag-theme-alpine .ag-body-horizontal-scroll-viewport,
+.ag-theme-alpine .ag-body-vertical-scroll-viewport {
+  scrollbar-width: thin;
+  scrollbar-color: #b8c2d1 #eef2f7;
+}
+
+.ag-theme-alpine .ag-body-viewport::-webkit-scrollbar,
+.ag-theme-alpine .ag-body-horizontal-scroll-viewport::-webkit-scrollbar,
+.ag-theme-alpine .ag-body-vertical-scroll-viewport::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.ag-theme-alpine .ag-body-viewport::-webkit-scrollbar-track,
+.ag-theme-alpine .ag-body-horizontal-scroll-viewport::-webkit-scrollbar-track,
+.ag-theme-alpine .ag-body-vertical-scroll-viewport::-webkit-scrollbar-track {
+  background: #eef2f7;
+  border-radius: 999px;
+}
+
+.ag-theme-alpine .ag-body-viewport::-webkit-scrollbar-thumb,
+.ag-theme-alpine .ag-body-horizontal-scroll-viewport::-webkit-scrollbar-thumb,
+.ag-theme-alpine .ag-body-vertical-scroll-viewport::-webkit-scrollbar-thumb {
+  background: #b8c2d1;
+  border-radius: 999px;
+}
+
+.ag-theme-alpine .ag-body-viewport::-webkit-scrollbar-thumb:hover,
+.ag-theme-alpine .ag-body-horizontal-scroll-viewport::-webkit-scrollbar-thumb:hover,
+.ag-theme-alpine .ag-body-vertical-scroll-viewport::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}

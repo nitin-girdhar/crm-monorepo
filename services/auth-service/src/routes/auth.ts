@@ -137,7 +137,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const new_hash = await hashPassword(new_password);
     const updated_rows = await withServiceTx(async (tx) => {
       return tx.unsafe<Array<{ password_changed_at: Date }>>(
-        `UPDATE users
+        `UPDATE iam.users
          SET password_hash = $1, password_changed_at = CLOCK_TIMESTAMP(), force_password_change = FALSE
          WHERE id = $2
          RETURNING password_changed_at`,

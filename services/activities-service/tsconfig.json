@@ -4,5 +4,13 @@
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": [
+    "src/routes",
+    "src/mutations",
+    "src/events",
+    "src/config.ts",
+    "src/types.ts",
+    "src/activity-logger.ts"
+  ]
 }

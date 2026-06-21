@@ -15,14 +15,13 @@ import {
 
 const ASSIGNMENT_EXPORT_COLUMNS: ExportColumn<AssignmentView>[] = [
   { header: 'Lead ID', value: (a) => a.lead_id },
-  { header: 'Name', value: (a) => a.lead_name ?? '' },
+  { header: 'Name', value: (a) => a.lead_full_name ?? '' },
   { header: 'Phone', value: (a) => a.lead_phone ?? '' },
   { header: 'Branch', value: (a) => a.branch },
-  { header: 'Assigned To', value: (a) => a.assignee_name ?? a.assignee_email ?? '' },
-  { header: 'Assignee Email', value: (a) => a.assignee_email ?? '' },
+  { header: 'Stage', value: (a) => a.lead_stage ?? '' },
+  { header: 'Assigned To', value: (a) => a.assigned_rep_name ?? a.assigned_rep_email ?? '' },
+  { header: 'Assignee Email', value: (a) => a.assigned_rep_email ?? '' },
   { header: 'Assigned At', value: (a) => formatDate(a.assigned_at) },
-  { header: 'Duplicate Lead ID', value: (a) => a.duplicate_lead_id ?? '' },
-  { header: 'Duplicate Source', value: (a) => a.duplicate_lead_platform ?? '' },
 ];
 
 interface Props {
@@ -50,7 +49,7 @@ export default function AssignmentsClient({ actor, assignments, candidates, titl
     const q = search.trim().toLowerCase();
     if (!q) return assignments;
     return assignments.filter((a) => {
-      const hay = `${a.lead_name ?? ''} ${a.lead_phone ?? ''} ${a.branch} ${a.assignee_email ?? ''} ${a.assignee_name ?? ''}`.toLowerCase();
+      const hay = `${a.lead_full_name ?? ''} ${a.lead_phone ?? ''} ${a.branch} ${a.assigned_rep_email ?? ''} ${a.assigned_rep_name ?? ''}`.toLowerCase();
       return hay.includes(q);
     });
   }, [assignments, search]);
@@ -111,25 +110,18 @@ export default function AssignmentsClient({ actor, assignments, candidates, titl
               {filtered.map((a) => (
                 <tr key={a.id} className="text-[#0F172A]">
                   <td className="px-4 py-2.5">
-                    <p className="text-sm font-semibold">{a.lead_name ?? '—'}</p>
+                    <p className="text-sm font-semibold">{a.lead_full_name ?? '—'}</p>
                     {a.lead_phone && <p className="text-[11px] text-[#64748B]">{a.lead_phone}</p>}
                   </td>
                   <td className="px-4 py-2.5 text-[#475569]">{a.branch}</td>
                   <td className="px-4 py-2.5">
                     <AssigneeBadge
                       user={
-                        a.assignee_name || a.assignee_email
-                          ? { name: a.assignee_name, email: a.assignee_email ?? '' }
+                        a.assigned_rep_name || a.assigned_rep_email
+                          ? { name: a.assigned_rep_name, email: a.assigned_rep_email ?? '' }
                           : null
                       }
                     />
-                    {(a.assignee_email || a.assignee_role) && (
-                      <p className="mt-0.5 text-[11px] text-[#64748B]">
-                        {a.assignee_email ?? ''}
-                        {a.assignee_email && a.assignee_role ? ' · ' : ''}
-                        {a.assignee_role ?? ''}
-                      </p>
-                    )}
                   </td>
                   <td className="px-4 py-2.5 text-xs text-[#64748B]">
                     {formatDate(a.assigned_at)}
@@ -137,9 +129,7 @@ export default function AssignmentsClient({ actor, assignments, candidates, titl
                   <td className="px-4 py-2.5">
                     {a.duplicate_lead_id ? (
                       <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-200">
-                        {a.duplicate_lead_platform
-                          ? a.duplicate_lead_platform.charAt(0).toUpperCase() + a.duplicate_lead_platform.slice(1)
-                          : 'Digital'}
+                        Duplicate
                       </span>
                     ) : null}
                   </td>
@@ -171,7 +161,7 @@ export default function AssignmentsClient({ actor, assignments, candidates, titl
             <li key={a.id} className="space-y-2 p-4">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-[#0F172A]">{a.lead_name ?? '—'}</p>
+                  <p className="text-sm font-semibold text-[#0F172A]">{a.lead_full_name ?? '—'}</p>
                   {a.lead_phone && <p className="text-xs text-[#64748B]">{a.lead_phone}</p>}
                   <p className="text-xs text-[#475569]">Branch: {a.branch}</p>
                 </div>
@@ -184,32 +174,16 @@ export default function AssignmentsClient({ actor, assignments, candidates, titl
                 </button>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <div>
-                  <AssigneeBadge
-                    user={
-                      a.assignee_name !== null || a.assignee_email !== null
-                        ? { name: a.assignee_name, email: a.assignee_email ?? '' }
-                        : null
-                    }
-                  />
-                  {(a.assignee_email || a.assignee_role) && (
-                    <p className="mt-0.5 text-[11px] text-[#64748B]">
-                      {a.assignee_email ?? ''}
-                      {a.assignee_email && a.assignee_role ? ' · ' : ''}
-                      {a.assignee_role ?? ''}
-                    </p>
-                  )}
-                </div>
+                <AssigneeBadge
+                  user={
+                    a.assigned_rep_name || a.assigned_rep_email
+                      ? { name: a.assigned_rep_name, email: a.assigned_rep_email ?? '' }
+                      : null
+                  }
+                />
                 <span className="text-[11px] text-[#94A3B8]">
                   {formatDate(a.assigned_at)}
                 </span>
-                {a.duplicate_lead_id && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-200">
-                    {a.duplicate_lead_platform
-                      ? a.duplicate_lead_platform.charAt(0).toUpperCase() + a.duplicate_lead_platform.slice(1)
-                      : 'Digital'} lead exists
-                  </span>
-                )}
               </div>
             </li>
           ))}

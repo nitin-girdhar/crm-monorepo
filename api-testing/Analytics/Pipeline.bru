@@ -1,0 +1,15 @@
+meta {
+  name: Get Pipeline by Stage
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/analytics/pipeline
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: auth_token={{authToken}}
+}

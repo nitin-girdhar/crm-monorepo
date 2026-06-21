@@ -11,9 +11,9 @@
 --   - 8 new orgs (org_seq 3-10): 3 more FitClass + 5 ITC Hotels
 --     (combined with the 2 existing FitClass orgs from init-seed.sql,
 --      this gives 5 FitClass orgs + 5 ITC Hotels orgs = 10 total)
---   - 8 users per NEW org: org_admin, org_sr_manager, org_manager,
+--   - 8 iam.users per NEW org: org_admin, org_sr_manager, org_manager,
 --     senior_sales_executive, sales_representative x3, read_only
---   - 2 ad_campaigns per NEW org
+--   - 2 marketing.ad_campaigns per NEW org
 --
 -- Idempotent: ON CONFLICT DO NOTHING / DO UPDATE throughout.
 -- All demo accounts password: Admin@12345
@@ -39,21 +39,21 @@ $$;
 -- ============================================================
 -- TENANTS
 -- ============================================================
-INSERT INTO tenants (id, name, domain_id, plan_type_id, metadata, is_active)
+INSERT INTO entity.tenants (id, name, domain_id, plan_type_id, metadata, is_active)
 VALUES
     (
         'a1000000-0000-0000-0000-000000000001',
         'FitClass',
-        (SELECT id FROM tenant_domains    WHERE name = 'fitness'),
-        (SELECT id FROM tenant_plan_types WHERE name = 'growth'),
+        (SELECT id FROM entity.tenant_domains    WHERE name = 'fitness'),
+        (SELECT id FROM entity.tenant_plan_types WHERE name = 'growth'),
         '{"brand_color":"#E84B1A","whatsapp_number":"+91-9810001001","features":{"ai_lead_scoring":true,"bulk_sms":true}}',
         TRUE
     ),
     (
         'a3000000-0000-0000-0000-000000000001',
         'ITC Hotels',
-        (SELECT id FROM tenant_domains    WHERE name = 'hospitality'),
-        (SELECT id FROM tenant_plan_types WHERE name = 'enterprise'),
+        (SELECT id FROM entity.tenant_domains    WHERE name = 'hospitality'),
+        (SELECT id FROM entity.tenant_plan_types WHERE name = 'enterprise'),
         '{"brand_color":"#7A1F2B","loyalty_program":"ITC Green Points","features":{"ai_lead_scoring":true,"bulk_sms":true,"channel_manager_sync":true}}',
         TRUE
     )
@@ -81,9 +81,9 @@ CREATE TEMP TABLE _org_config (
 
 -- NOTE on slot numbering within _seed_uuid(org_seq, slot):
 --   slot 0       = the organization's own id
---   slots 1-8    = users (1 admin, 2 sr_manager, 3 manager, 4 sse, 5-7 reps, 8 read_only)
---   slots 101-102 = ad_campaigns
--- Keeping these disjoint avoids any collision between an org row and its users.
+--   slots 1-8    = iam.users (1 admin, 2 sr_manager, 3 manager, 4 sse, 5-7 reps, 8 read_only)
+--   slots 101-102 = marketing.ad_campaigns
+-- Keeping these disjoint avoids any collision between an org row and its iam.users.
 INSERT INTO _org_config
   (org_seq, org_uuid, tenant_uuid, org_name, org_type, city_name, state_name, email_domain, address1, landmark, pincode, tenant_label)
 VALUES
@@ -104,7 +104,7 @@ VALUES
 -- ============================================================
 -- ORGANIZATIONS (all 10 orgs; ON CONFLICT DO NOTHING is idempotent)
 -- ============================================================
-INSERT INTO organizations
+INSERT INTO entity.organizations
     (id, tenant_id, name, legal_entity_name, brand_name, org_type_id,
      address_line1, landmark, pincode,
      city_id, state_id, country_id,
@@ -115,11 +115,11 @@ SELECT
     oc.org_name,
     CASE WHEN oc.tenant_label = 'fitclass' THEN 'FitClass' ELSE 'ITC' END,
     CASE WHEN oc.tenant_label = 'fitclass' THEN 'FitClass' ELSE 'ITC' END,
-    (SELECT id FROM org_types WHERE name = oc.org_type),
+    (SELECT id FROM entity.org_types WHERE name = oc.org_type),
     oc.address1, oc.landmark, oc.pincode,
-    (SELECT id FROM cities  WHERE name = oc.city_name),
-    (SELECT id FROM states  WHERE name = oc.state_name),
-    (SELECT id FROM countries WHERE iso_code = 'IN'),
+    (SELECT id FROM geo.cities  WHERE name = oc.city_name),
+    (SELECT id FROM geo.states  WHERE name = oc.state_name),
+    (SELECT id FROM geo.countries WHERE iso_code = 'IN'),
     'Asia/Kolkata',
     CASE WHEN oc.tenant_label = 'fitclass'
          THEN jsonb_build_object('capacity', 150 + (oc.org_seq * 20), 'equipment_tier', 'standard')
@@ -164,12 +164,12 @@ BEGIN
     -- org_admin
     v_fn_idx := 1 + ((v_org.org_seq * 7 + 0) % array_length(v_first_names,1));
     v_ln_idx := 1 + ((v_org.org_seq * 5 + 0) % array_length(v_last_names,1));
-    INSERT INTO users (id, org_id, first_name, last_name, mobile, email, role_id, manager_id, password_hash, is_active, force_password_change)
+    INSERT INTO iam.users (id, org_id, first_name, last_name, mobile, email, role_id, manager_id, password_hash, is_active, force_password_change)
     VALUES (
       v_admin_id, v_org.org_uuid, v_first_names[v_fn_idx], v_last_names[v_ln_idx],
       '+9198110' || LPAD(v_org.org_seq::TEXT,2,'0') || '001',
       'admin@' || v_org.email_domain,
-      (SELECT id FROM user_roles WHERE name = 'org_admin'), NULL,
+      (SELECT id FROM iam.user_roles WHERE name = 'org_admin'), NULL,
       v_password_hash, TRUE, FALSE
     )
     ON CONFLICT (email) DO UPDATE SET mobile = EXCLUDED.mobile, manager_id = EXCLUDED.manager_id, password_hash = EXCLUDED.password_hash;
@@ -177,12 +177,12 @@ BEGIN
     -- org_sr_manager
     v_fn_idx := 1 + ((v_org.org_seq * 7 + 1) % array_length(v_first_names,1));
     v_ln_idx := 1 + ((v_org.org_seq * 5 + 1) % array_length(v_last_names,1));
-    INSERT INTO users (id, org_id, first_name, last_name, mobile, email, role_id, manager_id, password_hash, is_active, force_password_change)
+    INSERT INTO iam.users (id, org_id, first_name, last_name, mobile, email, role_id, manager_id, password_hash, is_active, force_password_change)
     VALUES (
       v_srmgr_id, v_org.org_uuid, v_first_names[v_fn_idx], v_last_names[v_ln_idx],
       '+9198110' || LPAD(v_org.org_seq::TEXT,2,'0') || '004',
       'srmanager@' || v_org.email_domain,
-      (SELECT id FROM user_roles WHERE name = 'org_sr_manager'), v_admin_id,
+      (SELECT id FROM iam.user_roles WHERE name = 'org_sr_manager'), v_admin_id,
       v_password_hash, TRUE, FALSE
     )
     ON CONFLICT (email) DO UPDATE SET mobile = EXCLUDED.mobile, manager_id = EXCLUDED.manager_id, password_hash = EXCLUDED.password_hash;
@@ -190,12 +190,12 @@ BEGIN
     -- org_manager
     v_fn_idx := 1 + ((v_org.org_seq * 7 + 2) % array_length(v_first_names,1));
     v_ln_idx := 1 + ((v_org.org_seq * 5 + 2) % array_length(v_last_names,1));
-    INSERT INTO users (id, org_id, first_name, last_name, mobile, email, role_id, manager_id, password_hash, is_active, force_password_change)
+    INSERT INTO iam.users (id, org_id, first_name, last_name, mobile, email, role_id, manager_id, password_hash, is_active, force_password_change)
     VALUES (
       v_mgr_id, v_org.org_uuid, v_first_names[v_fn_idx], v_last_names[v_ln_idx],
       '+9198110' || LPAD(v_org.org_seq::TEXT,2,'0') || '005',
       'manager@' || v_org.email_domain,
-      (SELECT id FROM user_roles WHERE name = 'org_manager'), v_srmgr_id,
+      (SELECT id FROM iam.user_roles WHERE name = 'org_manager'), v_srmgr_id,
       v_password_hash, TRUE, FALSE
     )
     ON CONFLICT (email) DO UPDATE SET mobile = EXCLUDED.mobile, manager_id = EXCLUDED.manager_id, password_hash = EXCLUDED.password_hash;
@@ -203,12 +203,12 @@ BEGIN
     -- senior_sales_executive
     v_fn_idx := 1 + ((v_org.org_seq * 7 + 3) % array_length(v_first_names,1));
     v_ln_idx := 1 + ((v_org.org_seq * 5 + 3) % array_length(v_last_names,1));
-    INSERT INTO users (id, org_id, first_name, last_name, mobile, email, role_id, manager_id, password_hash, is_active, force_password_change)
+    INSERT INTO iam.users (id, org_id, first_name, last_name, mobile, email, role_id, manager_id, password_hash, is_active, force_password_change)
     VALUES (
       v_sse_id, v_org.org_uuid, v_first_names[v_fn_idx], v_last_names[v_ln_idx],
       '+9198110' || LPAD(v_org.org_seq::TEXT,2,'0') || '006',
       'senior.exec@' || v_org.email_domain,
-      (SELECT id FROM user_roles WHERE name = 'senior_sales_executive'), v_mgr_id,
+      (SELECT id FROM iam.user_roles WHERE name = 'senior_sales_executive'), v_mgr_id,
       v_password_hash, TRUE, FALSE
     )
     ON CONFLICT (email) DO UPDATE SET mobile = EXCLUDED.mobile, manager_id = EXCLUDED.manager_id, password_hash = EXCLUDED.password_hash;
@@ -216,41 +216,41 @@ BEGIN
     -- sales_representative x3 (slots 5, 6, 7)
     v_fn_idx := 1 + ((v_org.org_seq * 7 + 4) % array_length(v_first_names,1));
     v_ln_idx := 1 + ((v_org.org_seq * 5 + 4) % array_length(v_last_names,1));
-    INSERT INTO users (id, org_id, first_name, last_name, mobile, email, role_id, manager_id, password_hash, is_active, force_password_change)
+    INSERT INTO iam.users (id, org_id, first_name, last_name, mobile, email, role_id, manager_id, password_hash, is_active, force_password_change)
     VALUES (_seed_uuid(v_org.org_seq, 5), v_org.org_uuid, v_first_names[v_fn_idx], v_last_names[v_ln_idx],
       '+9198110' || LPAD(v_org.org_seq::TEXT,2,'0') || '002', 'rep1@' || v_org.email_domain,
-      (SELECT id FROM user_roles WHERE name = 'sales_representative'), v_sse_id, v_password_hash, TRUE, FALSE)
+      (SELECT id FROM iam.user_roles WHERE name = 'sales_representative'), v_sse_id, v_password_hash, TRUE, FALSE)
     ON CONFLICT (email) DO UPDATE SET mobile = EXCLUDED.mobile, manager_id = EXCLUDED.manager_id, password_hash = EXCLUDED.password_hash;
 
     v_fn_idx := 1 + ((v_org.org_seq * 7 + 5) % array_length(v_first_names,1));
     v_ln_idx := 1 + ((v_org.org_seq * 5 + 5) % array_length(v_last_names,1));
-    INSERT INTO users (id, org_id, first_name, last_name, mobile, email, role_id, manager_id, password_hash, is_active, force_password_change)
+    INSERT INTO iam.users (id, org_id, first_name, last_name, mobile, email, role_id, manager_id, password_hash, is_active, force_password_change)
     VALUES (_seed_uuid(v_org.org_seq, 6), v_org.org_uuid, v_first_names[v_fn_idx], v_last_names[v_ln_idx],
       '+9198110' || LPAD(v_org.org_seq::TEXT,2,'0') || '003', 'rep2@' || v_org.email_domain,
-      (SELECT id FROM user_roles WHERE name = 'sales_representative'), v_sse_id, v_password_hash, TRUE, FALSE)
+      (SELECT id FROM iam.user_roles WHERE name = 'sales_representative'), v_sse_id, v_password_hash, TRUE, FALSE)
     ON CONFLICT (email) DO UPDATE SET mobile = EXCLUDED.mobile, manager_id = EXCLUDED.manager_id, password_hash = EXCLUDED.password_hash;
 
     v_fn_idx := 1 + ((v_org.org_seq * 7 + 6) % array_length(v_first_names,1));
     v_ln_idx := 1 + ((v_org.org_seq * 5 + 6) % array_length(v_last_names,1));
-    INSERT INTO users (id, org_id, first_name, last_name, mobile, email, role_id, manager_id, password_hash, is_active, force_password_change)
+    INSERT INTO iam.users (id, org_id, first_name, last_name, mobile, email, role_id, manager_id, password_hash, is_active, force_password_change)
     VALUES (_seed_uuid(v_org.org_seq, 7), v_org.org_uuid, v_first_names[v_fn_idx], v_last_names[v_ln_idx],
       '+9198110' || LPAD(v_org.org_seq::TEXT,2,'0') || '009', 'rep3@' || v_org.email_domain,
-      (SELECT id FROM user_roles WHERE name = 'sales_representative'), v_sse_id, v_password_hash, TRUE, FALSE)
+      (SELECT id FROM iam.user_roles WHERE name = 'sales_representative'), v_sse_id, v_password_hash, TRUE, FALSE)
     ON CONFLICT (email) DO UPDATE SET mobile = EXCLUDED.mobile, manager_id = EXCLUDED.manager_id, password_hash = EXCLUDED.password_hash;
 
     -- read_only (slot 8)
     v_fn_idx := 1 + ((v_org.org_seq * 7 + 7) % array_length(v_first_names,1));
     v_ln_idx := 1 + ((v_org.org_seq * 5 + 7) % array_length(v_last_names,1));
-    INSERT INTO users (id, org_id, first_name, last_name, mobile, email, role_id, manager_id, password_hash, is_active, force_password_change)
+    INSERT INTO iam.users (id, org_id, first_name, last_name, mobile, email, role_id, manager_id, password_hash, is_active, force_password_change)
     VALUES (_seed_uuid(v_org.org_seq, 8), v_org.org_uuid, v_first_names[v_fn_idx], v_last_names[v_ln_idx],
       '+9198110' || LPAD(v_org.org_seq::TEXT,2,'0') || '007', 'viewer@' || v_org.email_domain,
-      (SELECT id FROM user_roles WHERE name = 'read_only'), NULL, v_password_hash, TRUE, FALSE)
+      (SELECT id FROM iam.user_roles WHERE name = 'read_only'), NULL, v_password_hash, TRUE, FALSE)
     ON CONFLICT (email) DO UPDATE SET mobile = EXCLUDED.mobile, manager_id = EXCLUDED.manager_id, password_hash = EXCLUDED.password_hash;
 
-    -- Seed user_org_mapping so the check_lead_fk_org_scope trigger and RLS work.
-    INSERT INTO user_org_mapping (user_id, org_id, role_id, granted_by, is_active)
+    -- Seed iam.user_org_mapping so the crm.check_lead_fk_org_scope trigger and RLS work.
+    INSERT INTO iam.user_org_mapping (user_id, org_id, role_id, granted_by, is_active)
     SELECT u.id, v_org.org_uuid, u.role_id, v_admin_id, TRUE
-    FROM users u
+    FROM iam.users u
     WHERE u.id IN (
       v_admin_id, v_srmgr_id, v_mgr_id, v_sse_id,
       _seed_uuid(v_org.org_seq, 5), _seed_uuid(v_org.org_seq, 6),
@@ -275,13 +275,13 @@ BEGIN
     PERFORM set_config('app.current_org_id', v_org.org_uuid::TEXT, TRUE);
     PERFORM set_config('app.current_user_id', _seed_uuid(v_org.org_seq, 1)::TEXT, TRUE);
 
-    INSERT INTO ad_campaigns (id, org_id, name, platform_id, status_id, budget, started_at, ended_at)
+    INSERT INTO marketing.ad_campaigns (id, org_id, name, platform_id, status_id, budget, started_at, ended_at)
     VALUES
       (
         _seed_uuid(v_org.org_seq, 101), v_org.org_uuid,
         v_org.org_name || ' - FB Lead Gen',
-        (SELECT id FROM marketing_platforms WHERE name = 'facebook'),
-        (SELECT id FROM campaign_statuses WHERE name = v_statuses[1 + (v_org.org_seq % 4)]),
+        (SELECT id FROM marketing.marketing_platforms WHERE name = 'facebook'),
+        (SELECT id FROM marketing.campaign_statuses WHERE name = v_statuses[1 + (v_org.org_seq % 4)]),
         15000.00 + (v_org.org_seq * 2500),
         (CURRENT_DATE - ((400 - v_org.org_seq * 10) || ' days')::INTERVAL),
         NULL
@@ -289,8 +289,8 @@ BEGIN
       (
         _seed_uuid(v_org.org_seq, 102), v_org.org_uuid,
         v_org.org_name || ' - Google Search',
-        (SELECT id FROM marketing_platforms WHERE name = 'google'),
-        (SELECT id FROM campaign_statuses WHERE name = v_statuses[1 + ((v_org.org_seq + 1) % 4)]),
+        (SELECT id FROM marketing.marketing_platforms WHERE name = 'google'),
+        (SELECT id FROM marketing.campaign_statuses WHERE name = v_statuses[1 + ((v_org.org_seq + 1) % 4)]),
         12000.00 + (v_org.org_seq * 1800),
         (CURRENT_DATE - ((350 - v_org.org_seq * 8) || ' days')::INTERVAL),
         NULL
@@ -304,8 +304,8 @@ COMMIT;
 -- ============================================================
 -- Sanity check (run manually after this script if you want to verify)
 -- ============================================================
--- SELECT t.name AS tenant, COUNT(DISTINCT o.id) AS orgs, COUNT(DISTINCT u.id) AS users
--- FROM tenants t
--- JOIN organizations o ON o.tenant_id = t.id
--- LEFT JOIN users u ON u.org_id = o.id
+-- SELECT t.name AS tenant, COUNT(DISTINCT o.id) AS orgs, COUNT(DISTINCT u.id) AS iam.users
+-- FROM entity.tenants t
+-- JOIN entity.organizations o ON o.tenant_id = t.id
+-- LEFT JOIN iam.users u ON u.org_id = o.id
 -- GROUP BY t.name;

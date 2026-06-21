@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from 'react';
 import type { SessionUser } from '@crm/types';
 import { ROLES, ROLE_LABELS, ROLE_RANK } from '@crm/auth-constants';
 import { canCreateUser } from '@/src/lib/permissions';
-import { RoleBadge } from '@/components/dashboard/RoleBadge';
+
 import UserStatusBadge from './UserStatusBadge';
 import DownloadButton from '@/components/common/DownloadButton';
 import {
@@ -16,10 +16,11 @@ import {
 
 const USER_EXPORT_COLUMNS: ExportColumn<SessionUser>[] = [
   { header: 'Name', value: (u) => u.name ?? '' },
+  { header: 'Role', value: (u) => u.role_label ?? ROLE_LABELS[u.role] ?? '' },
   { header: 'Email', value: (u) => u.email },
-  { header: 'Role', value: (u) => ROLE_LABELS[u.role] },
-  { header: 'Status', value: (u) => (u.is_active ? 'Active' : 'Inactive') },
+  { header: 'Branch', value: (u) => u.org_name ?? '' },
   { header: 'Manager', value: (u) => u.manager_name ?? '' },
+  { header: 'Status', value: (u) => (u.is_active ? 'Active' : 'Inactive') },
   { header: 'Last Login', value: (u) => u.last_login_at ?? '' },
 ];
 
@@ -42,6 +43,12 @@ export default function UsersTable({ users, currentUserId, actorRank, onEdit }: 
     (u: SessionUser) => canCreateUser(actorRank, u.rank),
     [actorRank],
   );
+
+  const userById = useMemo(() => {
+    const map = new Map<string, SessionUser>();
+    for (const u of users) map.set(u.id, u);
+    return map;
+  }, [users]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -106,7 +113,7 @@ export default function UsersTable({ users, currentUserId, actorRank, onEdit }: 
             <tr>
               <th className="px-4 py-2.5">Name</th>
               <th className="px-4 py-2.5">Email</th>
-              <th className="px-4 py-2.5">Role</th>
+              <th className="px-4 py-2.5">Branch</th>
               <th className="px-4 py-2.5">Manager</th>
               <th className="px-4 py-2.5">Status</th>
               <th className="px-4 py-2.5 text-right">Actions</th>
@@ -116,17 +123,33 @@ export default function UsersTable({ users, currentUserId, actorRank, onEdit }: 
             {filtered.map((u) => (
               <tr key={u.id} className="text-[#0F172A]">
                 <td className="px-4 py-2.5">
-                  {u.name ?? '—'}
-                  {u.id === currentUserId && (
-                    <span className="ml-2 text-[10px] font-semibold uppercase text-[#0b6cbf]">
-                      (you)
+                  <div>
+                    <span>
+                      {u.name ?? '—'}
+                      {u.id === currentUserId && (
+                        <span className="ml-2 text-[10px] font-semibold uppercase text-[#0b6cbf]">
+                          (you)
+                        </span>
+                      )}
                     </span>
-                  )}
+                    {u.role_label && (
+                      <span className="block text-[10px] text-[#94A3B8]">{u.role_label}</span>
+                    )}
+                  </div>
                 </td>
                 <td className="px-4 py-2.5 text-[#475569]">{u.email}</td>
-                <td className="px-4 py-2.5"><RoleBadge role={u.role} /></td>
+                <td className="px-4 py-2.5 text-xs text-[#475569]">{u.org_name || '—'}</td>
                 <td className="px-4 py-2.5 text-xs text-[#475569]">
-                  {u.manager_name ?? <span className="italic text-[#94A3B8]">—</span>}
+                  {u.manager_id ? (
+                    <div>
+                      <span>{u.manager_name ?? '—'}</span>
+                      {userById.get(u.manager_id)?.role_label && (
+                        <span className="block text-[10px] text-[#94A3B8]">{userById.get(u.manager_id)!.role_label}</span>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="italic text-[#94A3B8]">—</span>
+                  )}
                 </td>
                 <td className="px-4 py-2.5"><UserStatusBadge active={u.is_active} /></td>
                 <td className="px-4 py-2.5 text-right">
@@ -169,6 +192,9 @@ export default function UsersTable({ users, currentUserId, actorRank, onEdit }: 
                     <span className="ml-2 text-[10px] font-semibold uppercase text-[#0b6cbf]">(you)</span>
                   )}
                 </p>
+                {u.role_label && (
+                  <p className="text-[10px] text-[#94A3B8]">{u.role_label}</p>
+                )}
                 <p className="truncate text-xs text-[#475569]">{u.email}</p>
               </div>
               {canEditRow(u) ? (
@@ -186,7 +212,6 @@ export default function UsersTable({ users, currentUserId, actorRank, onEdit }: 
               )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <RoleBadge role={u.role} />
               <UserStatusBadge active={u.is_active} />
               {u.manager_name ? (
                 <span className="text-[11px] text-[#475569]">↑ {u.manager_name}</span>

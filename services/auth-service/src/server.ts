@@ -1,19 +1,44 @@
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
-import { config } from './config.js';
-import { authRoutes } from './routes/auth.js';
+import { ZodError } from 'zod';
+import { config } from './config/index.js';
+import { v1Router } from './api/v1/index.js';
+import { AppError } from './lib/errors.js';
 import { closeAllPools } from '@crm/db';
 
 const app = Fastify({
   logger: {
-    level: config.nodeEnv === 'production' ? 'info' : 'debug',
-    ...(config.nodeEnv !== 'production' ? { transport: { target: 'pino-pretty', options: { colorize: true } } } : {}),
+    level: config.logLevel,
+    ...(config.nodeEnv !== 'production'
+      ? { transport: { target: 'pino-pretty', options: { colorize: true } } }
+      : {}),
   },
 });
 
 app.register(cookie);
 
-app.register(authRoutes);
+app.setErrorHandler((error, request, reply) => {
+  if (error instanceof AppError) {
+    const level = error.statusCode >= 500 ? 'error' : 'warn';
+    app.log[level]({ err: error, path: request.url }, error.message);
+    return reply.status(error.statusCode).send({
+      success: false,
+      error: error.message,
+      ...(error.details !== undefined ? { details: error.details } : {}),
+    });
+  }
+  if (error instanceof ZodError) {
+    return reply.status(422).send({
+      success: false,
+      error: 'Validation failed',
+      details: error.flatten().fieldErrors,
+    });
+  }
+  app.log.error({ err: error }, 'Unhandled error');
+  return reply.status(500).send({ success: false, error: 'Internal server error' });
+});
+
+app.register(v1Router, { prefix: '/api/v1' });
 
 app.get('/health', async () => ({ status: 'ok', service: 'auth-service' }));
 

@@ -46,10 +46,10 @@ export const DASHBOARD_NAV: readonly NavItem[] = [
     roles: [...ADMIN_ROLES, ...MANAGER_ROLES, ...SSE_ROLES, ...SE_ROLES],
   },
   {
-    id: 'my-leads',
-    label: 'My Leads',
-    href: '/dashboard/my-leads',
-    roles: [...SSE_ROLES, ...SE_ROLES],
+    id: 'leads-history',
+    label: 'Leads History',
+    href: '/dashboard/leads-history',
+    roles: [...ADMIN_ROLES, ...MANAGER_ROLES, ...SSE_ROLES, ...SE_ROLES],
   },
 ] as const;
 

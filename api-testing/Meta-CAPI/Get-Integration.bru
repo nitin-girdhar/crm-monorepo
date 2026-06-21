@@ -1,0 +1,15 @@
+meta {
+  name: Get Meta Integration
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/meta/integration
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: auth_token={{authToken}}
+}

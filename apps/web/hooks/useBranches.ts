@@ -42,7 +42,8 @@ export function useBranches(locationFilter?: LocationFilter): UseBranchesReturn 
       const res = await fetch(`/api/branches?${params}`, { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-      const raw: Array<{ id: string; name: string; city_id?: number | null; state_id?: number | null; country_id?: number | null; cityId?: number | null; stateId?: number | null; countryId?: number | null }> = await res.json();
+      const json = await res.json() as { data?: Array<{ id: string; name: string; city_id?: number | null; state_id?: number | null; country_id?: number | null; cityId?: number | null; stateId?: number | null; countryId?: number | null }> };
+      const raw = json.data ?? [];
 
       setBranches(
         raw.map((o) => ({

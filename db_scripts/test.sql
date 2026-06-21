@@ -13,7 +13,27 @@ from public.users
 
 select *
 from public.users
+where users.manager_id is null
 where email = 'komal.hegde@fitclass.in'
 
 select *
 from public.marketing_leads
+
+select *
+from public.user_org_mapping
+
+select *
+from public.branches
+
+select *
+from public.ad_campaigns
+
+select *
+from public.marketing_platforms
+
+
+select *
+from public.campaign_statuses
+
+select *
+from public.test

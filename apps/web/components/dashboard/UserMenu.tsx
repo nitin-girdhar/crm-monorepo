@@ -89,18 +89,18 @@ export default function UserMenu({ user }: Props) {
               <p className="truncate text-xs text-[#64748B]">{user.mobile}</p>
             )}
             {(showTenant || showOrg) && (
-              <div className="mt-1.5 flex flex-col gap-0.5 border-t border-[#F1F5F9] pt-1.5">
+              <div className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 border-t border-[#F1F5F9] pt-1.5 text-xs">
                 {showTenant && (
-                  <div className="flex items-center gap-1.5 text-xs text-[#64748B]">
-                    <span className="w-12 shrink-0 font-semibold text-[#94A3B8]">Tenant</span>
-                    <span className="truncate">{user.tenant_name}</span>
-                  </div>
+                  <>
+                    <span className="whitespace-nowrap font-semibold text-[#94A3B8]">Company</span>
+                    <span className="truncate text-[#64748B]">{user.tenant_name}</span>
+                  </>
                 )}
                 {showOrg && (
-                  <div className="flex items-center gap-1.5 text-xs text-[#64748B]">
-                    <span className="w-12 shrink-0 font-semibold text-[#94A3B8]">Org</span>
-                    <span className="truncate">{user.org_name}</span>
-                  </div>
+                  <>
+                    <span className="whitespace-nowrap font-semibold text-[#94A3B8]">Branch</span>
+                    <span className="truncate text-[#64748B]">{user.org_name}</span>
+                  </>
                 )}
               </div>
             )}

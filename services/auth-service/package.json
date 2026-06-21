@@ -8,7 +8,8 @@
     "dev": "tsx watch --env-file ../../.env src/server.ts",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
-    "clean": "rimraf dist"
+    "clean": "rimraf dist",
+    "dev:local": "tsx watch --env-file .env src/server.ts"
   },
   "dependencies": {
     "@crm/auth-constants": "workspace:*",
@@ -16,7 +17,10 @@
     "@crm/types": "workspace:*",
     "@crm/validation": "workspace:*",
     "bcryptjs": "^3.0.3",
+    "drizzle-orm": "^0.44.0",
     "fastify": "^5.2.1",
+    "fastify-plugin": "^5.0.1",
+    "zod": "^3.22.0",
     "@fastify/cookie": "^11.0.2",
     "jose": "^6.2.3",
     "jsonwebtoken": "^9.0.3",

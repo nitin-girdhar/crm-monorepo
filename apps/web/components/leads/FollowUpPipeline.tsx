@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import type { LeadView } from '@crm/types';
+import { LeadHistoryModal } from '@/components/LeadHistoryModal';
 
 interface FollowUpEnriched {
   followUpId: string;
@@ -44,10 +46,26 @@ function OverdueBadge({ minutes }: { minutes: number }) {
   );
 }
 
+function followUpToLeadView(item: FollowUpEnriched): LeadView {
+  return {
+    lead_id: item.leadId, org_id: '', org_name: '', first_name: '', middle_name: null, last_name: '',
+    full_name: item.leadFullName, phone: item.leadPhone, email: null, address_line1: null,
+    city: null, city_name: null, state_name: null, country_name: null,
+    stage: item.leadStage, stage_label: item.leadStage.replace(/_/g, ' '), branch: null, source: null,
+    followup_required: false, is_rejected: false, is_terminated: false,
+    outcome: null, outcome_label: null, outcome_comment: null, stage_id: '', outcome_id: null,
+    campaign_name: null, platform: null, assigned_rep_name: item.assignedRepName,
+    assigned_rep_email: item.assignedRepEmail, tags: [], metadata: {},
+    created_at: new Date(), updated_at: new Date(), is_deleted: false,
+    assigned_user_id: null, campaign_id: null,
+  };
+}
+
 export function FollowUpPipeline({ assignedRepId, overdueOnly }: Props) {
   const [pipeline, setPipeline] = useState<FollowUpEnriched[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [historyLead, setHistoryLead] = useState<FollowUpEnriched | null>(null);
 
   const fetchPipeline = useCallback(() => {
     setLoading(true);
@@ -61,7 +79,10 @@ export function FollowUpPipeline({ assignedRepId, overdueOnly }: Props) {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
-      .then((d) => setPipeline((d as { pipeline?: FollowUpEnriched[] }).pipeline ?? []))
+      .then((d) => {
+        const body = d as { data?: FollowUpEnriched[]; pipeline?: FollowUpEnriched[] };
+        setPipeline(body.data ?? body.pipeline ?? []);
+      })
       .catch((err) => setError((err as Error).message ?? 'Failed to load follow-ups'))
       .finally(() => setLoading(false));
   }, [assignedRepId, overdueOnly]);
@@ -95,6 +116,7 @@ export function FollowUpPipeline({ assignedRepId, overdueOnly }: Props) {
   }
 
   return (
+    <>
     <div className="overflow-x-auto rounded-xl border border-[#E2E8F0] bg-white shadow-sm">
       <table className="min-w-full divide-y divide-[#F1F5F9] text-sm">
         <thead className="bg-[#F8FAFC]">
@@ -155,17 +177,28 @@ export function FollowUpPipeline({ assignedRepId, overdueOnly }: Props) {
                 {item.notes ?? <span className="text-[#94A3B8]">—</span>}
               </td>
               <td className="px-4 py-3">
-                <a
-                  href={`/dashboard/leads?leadId=${item.leadId}`}
-                  className="text-xs font-semibold text-[#0b6cbf] hover:underline"
+                <button
+                  type="button"
+                  onClick={() => setHistoryLead(item)}
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-[#0b6cbf] hover:underline"
                 >
-                  View lead
-                </a>
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  History
+                </button>
               </td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
+    {historyLead && (
+      <LeadHistoryModal
+        lead={{ lead_id: historyLead.leadId }}
+        onClose={() => setHistoryLead(null)}
+      />
+    )}
+    </>
   );
 }
