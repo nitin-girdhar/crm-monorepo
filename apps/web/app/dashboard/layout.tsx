@@ -6,6 +6,7 @@ import { AUTH_COOKIE_NAME, JWT_ISSUER, JWT_AUDIENCE } from '@crm/auth-constants'
 import DashboardNavbar from '@/components/dashboard/DashboardNavbar';
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar';
 import SidebarController from '@/components/dashboard/SidebarController';
+import { NotificationProvider } from '@/providers/NotificationProvider';
 
 export const dynamic = 'force-dynamic';
 
@@ -67,15 +68,17 @@ export default async function DashboardLayout({ children }: { children: React.Re
   }
 
   return (
-    <div className="flex min-h-screen w-full flex-col bg-[#F8FAFC] lg:h-full lg:min-h-0 lg:overflow-hidden">
-      <DashboardNavbar user={session} />
-      <SidebarController role={session.role} />
-      <div className="flex w-full flex-1 lg:min-h-0 lg:overflow-hidden">
-        <DashboardSidebar role={session.role} />
-        <main className="flex w-full min-w-0 flex-1 flex-col lg:overflow-y-auto">
-          {children}
-        </main>
+    <NotificationProvider>
+      <div className="flex min-h-screen w-full flex-col bg-[#F8FAFC] lg:h-full lg:min-h-0 lg:overflow-hidden">
+        <DashboardNavbar user={session} />
+        <SidebarController role={session.role} />
+        <div className="flex w-full flex-1 lg:min-h-0 lg:overflow-hidden">
+          <DashboardSidebar role={session.role} />
+          <main className="flex w-full min-w-0 flex-1 flex-col lg:overflow-y-auto">
+            {children}
+          </main>
+        </div>
       </div>
-    </div>
+    </NotificationProvider>
   );
 }

@@ -2,6 +2,7 @@ import type { RoleTxContext } from '@crm/db';
 import type { CreateLeadInput, UpdateLeadInput, CreateInteractionInput, CreateFollowUpInput } from '@crm/validation';
 import { AppError, NotFoundError, ForbiddenError } from '../../../lib/errors.js';
 import { logActivity } from '../../../lib/activity-logger.js';
+import { publishEvent } from '../../../events/publisher.js';
 import { fireCapiAutoTrigger } from '../../../lib/meta-capi-trigger.js';
 import * as repo from './leads.repository.js';
 import type { ListLeadsFilters, ListFollowUpsFilters } from './leads.repository.js';
@@ -47,6 +48,11 @@ export async function getStageOutcomes(stageId?: string) {
 export async function createLead(ctx: RoleTxContext, data: CreateLeadInput) {
   const result = await repo.createLead(ctx, data);
   await logActivity({ action_type: 'lead_created', performed_by: ctx.user_id, lead_id: result.id });
+  publishEvent('lead:created', {
+    lead_id: result.id, org_id: ctx.org_id, tenant_id: ctx.tenant_id,
+    assigned_user_id: data.assigned_user_id ?? null,
+    actor_id: ctx.user_id,
+  });
   return result;
 }
 
@@ -66,6 +72,13 @@ export async function updateLead(ctx: RoleTxContext, leadId: string, data: Updat
       fireCapiAutoTrigger(leadId, ctx.org_id, data.stage_id);
     }
 
+    publishEvent('lead:updated', {
+      lead_id: leadId, org_id: ctx.org_id, tenant_id: ctx.tenant_id,
+      assigned_user_id: result.assignedUserId ?? null,
+      actor_id: ctx.user_id,
+      changes: data,
+    });
+
     return result;
   } catch (err) {
     if (err instanceof AppError) throw err;
@@ -77,6 +90,11 @@ export async function updateLead(ctx: RoleTxContext, leadId: string, data: Updat
 export async function deleteLead(ctx: RoleTxContext, leadId: string, comment: string) {
   await repo.deleteLead(ctx, leadId, comment);
   await logActivity({ action_type: 'lead_deleted', performed_by: ctx.user_id, lead_id: leadId });
+  publishEvent('lead:deleted', {
+    lead_id: leadId, org_id: ctx.org_id, tenant_id: ctx.tenant_id,
+    assigned_user_id: null,
+    actor_id: ctx.user_id,
+  });
 }
 
 export async function createInteraction(

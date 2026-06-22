@@ -305,11 +305,12 @@ export function LeadEditModal({
                 </label>
                 <textarea
                   value={transitionNote}
-                  onChange={(e) => setTransitionNote(e.target.value)}
+                  onChange={(e) => { setTransitionNote(e.target.value); setErrors(p => ({ ...p, transitionNote: '' })); }}
                   placeholder="Add a note about this change…"
                   rows={2}
-                  className="w-full resize-none rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#0F172A] placeholder:text-[#CBD5E1] focus:border-[#0b6cbf] focus:outline-none focus:ring-2 focus:ring-[#0b6cbf]/20"
+                  className={`w-full resize-none rounded-lg border px-3 py-2 text-sm text-[#0F172A] placeholder:text-[#CBD5E1] focus:outline-none focus:ring-2 ${errors.transitionNote ? 'border-red-400 focus:ring-red-200' : 'border-[#E2E8F0] focus:border-[#0b6cbf] focus:ring-[#0b6cbf]/20'}`}
                 />
+                {errors.transitionNote && <p className="text-xs text-red-500">{errors.transitionNote}</p>}
               </div>
             )}
           </div>

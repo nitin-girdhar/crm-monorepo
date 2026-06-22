@@ -152,10 +152,10 @@ export async function updateLead(
       `UPDATE crm.marketing_leads
        SET ${sets.join(', ')}
        WHERE id = $${params.length - 1} AND org_id = $${params.length} AND NOT is_deleted
-       RETURNING id`,
+       RETURNING id, assigned_user_id`,
       params as unknown as SqlParams,
     );
-    const result = (update_rows as unknown as Array<{ id: string }>)[0];
+    const result = (update_rows as unknown as Array<{ id: string; assigned_user_id: string | null }>)[0];
     if (!result) return null;
 
     if (data.note && data.note.trim()) {

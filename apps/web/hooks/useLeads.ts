@@ -33,6 +33,9 @@ interface UseLeadsReturn {
   stageIdToName: Record<string, string>;
   updateLead: (payload: UpdatePayload) => Promise<void>;
   refetch: () => Promise<void>;
+  addLeadById: (leadId: string) => Promise<void>;
+  updateLeadById: (leadId: string) => Promise<void>;
+  removeLeadById: (leadId: string) => void;
 }
 
 export function useLeads(orgIds?: string[], platforms?: string[]): UseLeadsReturn {
@@ -174,6 +177,29 @@ export function useLeads(orgIds?: string[], platforms?: string[]): UseLeadsRetur
 
   const refetch = useCallback(() => fetchData(true), [fetchData]);
 
+  const addLeadById = useCallback(async (leadId: string) => {
+    try {
+      // Re-fetch via the full list endpoint for a single lead to get the
+      // dashboard view shape (lead_id, stage label, rep name, etc.)
+      await fetchData(true);
+    } catch {
+      // Lead not visible to this user (RLS) — ignore
+    }
+  }, [fetchData]);
+
+  const updateLeadById = useCallback(async (leadId: string) => {
+    try {
+      await fetchData(true);
+    } catch {
+      // Silent refetch failed — ignore
+    }
+  }, [fetchData]);
+
+  const removeLeadById = useCallback((leadId: string) => {
+    setLeads((prev) => prev.filter((l) => l.lead_id !== leadId));
+    setServerTotal((t) => Math.max(0, t - 1));
+  }, []);
+
   return {
     leads,
     stats: { total: leads.length, lastUpdated, serverTotal },
@@ -191,5 +217,8 @@ export function useLeads(orgIds?: string[], platforms?: string[]): UseLeadsRetur
     stageIdToName,
     updateLead,
     refetch,
+    addLeadById,
+    updateLeadById,
+    removeLeadById,
   };
 }

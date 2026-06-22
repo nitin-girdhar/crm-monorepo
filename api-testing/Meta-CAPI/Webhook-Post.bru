@@ -1,0 +1,52 @@
+meta {
+  name: Webhook Lead Callback (Meta)
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/meta/webhook/{{integrationId}}
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "object": "page",
+    "entry": [
+      {
+        "id": "123456789",
+        "time": 1719100000,
+        "changes": [
+          {
+            "field": "leadgen",
+            "value": {
+              "leadgen_id": "989906403816053",
+              "page_id": "123456789",
+              "form_id": "2217695302333588",
+              "created_time": 1719100000
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
+
+docs {
+  Simulates a Meta Lead Ads webhook callback.
+  In production Meta signs the body with X-Hub-Signature-256.
+  In development mode (NODE_ENV=development) HMAC is skipped.
+
+  The service will:
+  1. Verify HMAC signature (skipped in dev)
+  2. Fetch lead details from Meta Graph API
+  3. Insert into crm.marketing_leads and ext.meta_leads
+  4. Fire a crm_events pg_notify if not a duplicate
+
+  Response: { received: true, processed: N, results: [...] }
+}

@@ -5,13 +5,13 @@ meta {
 }
 
 post {
-  url: {{baseUrl}}/meta/capi/auto-trigger
+  url: {{metaServiceUrl}}/api/v1/capi/auto-trigger
   body: json
   auth: none
 }
 
 headers {
-  Cookie: auth_token={{authToken}}
+  X-Internal-Secret: {{internalServiceSecret}}
 }
 
 body:json {
@@ -20,4 +20,11 @@ body:json {
     "orgId": "{{orgId}}",
     "newStageId": "{{stageId}}"
   }
+}
+
+docs {
+  Internal-only endpoint (not exposed through api-gateway).
+  Called by leads-service on stage changes when the new stage
+  is in the org's capi_trigger_stages list.
+  Requires X-Internal-Secret header instead of JWT auth.
 }

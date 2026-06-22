@@ -2,6 +2,7 @@ import type { RoleTxContext } from '@crm/db';
 import type { CreateFollowUpInput } from '@crm/validation';
 import { NotFoundError } from '../../../lib/errors.js';
 import { logActivity } from '../../../lib/activity-logger.js';
+import { publishEvent } from '../../../events/publisher.js';
 import * as repo from './follow-ups.repository.js';
 import type { UpdateFollowUpBody } from './follow-ups.schema.js';
 
@@ -12,6 +13,11 @@ export async function createFollowUp(ctx: RoleTxContext, leadId: string, data: C
     ...(data.notes !== undefined ? { notes: data.notes } : {}),
   });
   await logActivity({ action_type: 'follow_up_created', performed_by: ctx.user_id, lead_id: leadId });
+  publishEvent('followup:created', {
+    lead_id: leadId, org_id: ctx.org_id, tenant_id: ctx.tenant_id,
+    assigned_user_id: data.assigned_user_id ?? ctx.user_id,
+    actor_id: ctx.user_id,
+  });
   return result;
 }
 

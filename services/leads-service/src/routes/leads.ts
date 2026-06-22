@@ -22,6 +22,7 @@ import { createLead, updateLead, deleteLead, createInteraction } from '../mutati
 import { createFollowUp, updateFollowUp, deleteFollowUp } from '../mutations/follow-ups.js';
 import { toLeadView } from '../serializers/leads.js';
 import { logActivity } from '../activity-logger.js';
+import { publishEvent } from '../events/publisher.js';
 import { parseAuthContext } from '../lib/auth-context.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -92,6 +93,11 @@ export async function leadsRoutes(app: FastifyInstance): Promise<void> {
     try {
       const result = await createLead(org_id, user_id, parsed.data, role, tenant_id);
       await logActivity({ action_type: 'lead_created', performed_by: user_id, lead_id: result.id });
+      publishEvent('lead:created', {
+        lead_id: result.id, org_id, tenant_id,
+        assigned_user_id: parsed.data.assigned_user_id ?? null,
+        actor_id: user_id,
+      });
       return reply.status(201).send({ lead: { id: result.id } });
     } catch (err) {
       const e = err as Error & { field?: string };
@@ -156,6 +162,13 @@ export async function leadsRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
+      publishEvent('lead:updated', {
+        lead_id: id, org_id, tenant_id,
+        assigned_user_id: result.assigned_user_id ?? null,
+        actor_id: user_id,
+        changes: parsed.data,
+      });
+
       return reply.status(200).send({ ok: true });
     } catch (err) {
       const msg = (err as Error).message;
@@ -190,6 +203,11 @@ export async function leadsRoutes(app: FastifyInstance): Promise<void> {
       performed_by: user_id,
       lead_id: id,
       new_value: { comment },
+    });
+    publishEvent('lead:deleted', {
+      lead_id: id, org_id, tenant_id,
+      assigned_user_id: null,
+      actor_id: user_id,
     });
     return reply.status(200).send({ ok: true });
   });
@@ -297,6 +315,11 @@ export async function leadsRoutes(app: FastifyInstance): Promise<void> {
       tenant_id,
     );
     await logActivity({ action_type: 'follow_up_created', performed_by: user_id, lead_id: id });
+    publishEvent('followup:created', {
+      lead_id: id, org_id, tenant_id,
+      assigned_user_id: parsed.data.assigned_user_id ?? user_id,
+      actor_id: user_id,
+    });
     return reply.status(201).send({ follow_up });
   });
 

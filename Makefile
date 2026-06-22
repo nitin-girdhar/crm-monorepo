@@ -15,7 +15,7 @@ install: ## Install all workspace dependencies
 	$(PNPM) install
 
 dev: install dev-infra ## Start the full stack locally (Postgres + all services + web)
-	$(PNPM) turbo dev --concurrency 16
+	$(PNPM) turbo dev --concurrency 20
 
 dev-infra: ## Start Postgres in Docker and wait until healthy
 	$(COMPOSE) up -d --wait postgres

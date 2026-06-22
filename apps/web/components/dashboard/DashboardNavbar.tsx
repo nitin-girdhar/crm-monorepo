@@ -3,6 +3,7 @@ import Link from 'next/link';
 import type { SessionUser } from '@crm/types';
 import UserMenu from './UserMenu';
 import HamburgerButton from './HamburgerButton';
+import NotificationBell from '@/components/layout/NotificationBell';
 
 interface Props {
   user: SessionUser;
@@ -32,6 +33,7 @@ export default function DashboardNavbar({ user }: Props) {
           Workspace
         </span>
         <div className="flex-1" />
+        <NotificationBell />
         <UserMenu user={user} />
       </div>
     </header>

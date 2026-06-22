@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SessionUser } from '@crm/types';
 import { users as usersApi } from '@/src/lib/api/client';
 import { useBranches, type DynamicBranch } from '@/hooks/useBranches';
 import { useLeads } from '@/hooks/useLeads';
+import { useRealtimeEvents } from '@/hooks/useRealtimeEvents';
+import { useNotifications } from '@/providers/NotificationProvider';
 import { useLocationFilters } from '@/hooks/useLocationFilters';
 import { useLeadSources } from '@/hooks/useLeadSources';
 import LocationFilters from '@/components/dashboard/LocationFilters';
@@ -107,7 +109,24 @@ export default function LeadDashboardShell({ actor }: Props) {
     statusOptions, statusLabelMap, requiresFollowupStatuses,
     rejectionStatuses, stageOutcomes, stageIdToName,
     updateLead, refetch,
+    addLeadById, updateLeadById, removeLeadById,
   } = useLeads(orgIds, platforms);
+
+  const { addNotification } = useNotifications();
+
+  useRealtimeEvents(actor.id, {
+    onLeadCreated: useCallback((leadId: string) => { addLeadById(leadId); }, [addLeadById]),
+    onLeadUpdated: useCallback((leadId: string) => { updateLeadById(leadId); }, [updateLeadById]),
+    onLeadDeleted: useCallback((leadId: string) => { removeLeadById(leadId); }, [removeLeadById]),
+    onFollowUpDue: useCallback((data) => {
+      addNotification({
+        id: data.follow_up_id ?? Date.now().toString(),
+        leadId: data.lead_id,
+        message: data.message,
+        scheduledAt: data.scheduled_at,
+      });
+    }, [addNotification]),
+  });
 
   const [candidates, setCandidates] = useState<SessionUser[]>([]);
   const canInlineAssign = INLINE_ASSIGN_ROLES.includes(actor.role);

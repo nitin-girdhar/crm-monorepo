@@ -20,5 +20,6 @@ export const config = {
   analyticsServiceUrl: process.env['ANALYTICS_SERVICE_URL'] ?? 'http://localhost:4005',
   activitiesServiceUrl: process.env['ACTIVITIES_SERVICE_URL'] ?? 'http://localhost:4006',
   metaServiceUrl: process.env['META_SERVICE_URL'] ?? 'http://localhost:4007',
+  notificationsServiceUrl: process.env['NOTIFICATIONS_SERVICE_URL'] ?? 'http://localhost:4008',
   webUrl: process.env['WEB_URL'] ?? 'http://localhost:3000',
 } as const;

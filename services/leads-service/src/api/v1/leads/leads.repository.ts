@@ -401,7 +401,7 @@ export async function updateLead(ctx: RoleTxContext, leadId: string, data: Updat
         eq(marketingLeadsTable.orgId, ctx.org_id),
         eq(marketingLeadsTable.isDeleted, false),
       ))
-      .returning({ id: marketingLeadsTable.id });
+      .returning({ id: marketingLeadsTable.id, assignedUserId: marketingLeadsTable.assignedUserId });
 
     if (!updated) return null;
 

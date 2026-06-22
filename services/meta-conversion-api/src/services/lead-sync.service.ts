@@ -24,6 +24,19 @@ export interface SyncLeadResult {
   isDuplicate: boolean;
 }
 
+/**
+ * Safely convert a string to BigInt, returning null when the value is
+ * not a valid integer representation (e.g. 'unknown', undefined, '').
+ */
+function safeBigInt(value: string | undefined | null): bigint | null {
+  if (value == null || value === '') return null;
+  try {
+    return BigInt(value);
+  } catch {
+    return null;
+  }
+}
+
 function extractFieldValue(fieldData: MetaLeadFieldData[], metaKey: string): string | undefined {
   const field = fieldData.find((f) => f.name === metaKey);
   return field?.values[0]?.trim() || undefined;
@@ -62,8 +75,13 @@ export async function syncLeadToDatabase(
 
   return withServiceTx(async (tx) => {
     // Dedup: check if this Meta lead was already synced
+    const metaLeadBigId = safeBigInt(lead.id);
+    if (metaLeadBigId === null) {
+      throw new Error(`Invalid Meta lead ID: "${lead.id}" is not a numeric value`);
+    }
+
     const existing = await tx.execute(
-      sql`SELECT id, marketing_lead_id FROM ext.meta_leads WHERE meta_lead_id = ${BigInt(lead.id)} LIMIT 1`,
+      sql`SELECT id, marketing_lead_id FROM ext.meta_leads WHERE meta_lead_id = ${metaLeadBigId} LIMIT 1`,
     );
     const existingRows = existing as unknown as Array<{ id: string; marketing_lead_id: string }>;
     const existingRow = existingRows[0];
@@ -98,21 +116,21 @@ export async function syncLeadToDatabase(
             stage_id, source_id, metadata, created_at
           ) VALUES (
             ${orgId},
-            ${contact.firstName},
+            ${contact.firstName ?? ''},
             ${null},
-            ${contact.lastName},
+            ${contact.lastName ?? ''},
             ${contact.phone},
             ${contact.email},
             ${stageId ?? null},
             ${sourceId ?? null},
             ${JSON.stringify({ meta_lead_id: lead.id, form_id: lead.form_id, platform: 'facebook' })},
-            ${leadCreatedAt}
+            ${leadCreatedAt.toISOString()}
           )
           ON CONFLICT (org_id, phone) WHERE phone IS NOT NULL AND NOT is_deleted
           DO UPDATE SET
             email      = COALESCE(crm.marketing_leads.email, EXCLUDED.email),
-            first_name = COALESCE(crm.marketing_leads.first_name, EXCLUDED.first_name),
-            last_name  = COALESCE(crm.marketing_leads.last_name, EXCLUDED.last_name),
+            first_name = COALESCE(NULLIF(crm.marketing_leads.first_name, ''), EXCLUDED.first_name),
+            last_name  = COALESCE(NULLIF(crm.marketing_leads.last_name,  ''), EXCLUDED.last_name),
             updated_at = NOW()
           RETURNING id`,
     );
@@ -125,11 +143,11 @@ export async function syncLeadToDatabase(
             platform, lead_created_at, full_name, first_name, last_name, email, phone,
             whatsapp_number, raw_field_data
           ) VALUES (
-            ${orgId}, ${marketingLeadId}, ${BigInt(lead.id)}, ${BigInt(lead.form_id)},
-            ${lead.campaign_id ? BigInt(lead.campaign_id) : null},
-            ${lead.adset_id ? BigInt(lead.adset_id) : null},
-            ${lead.ad_id ? BigInt(lead.ad_id) : null},
-            ${'fb'}, ${leadCreatedAt},
+            ${orgId}, ${marketingLeadId}, ${metaLeadBigId}, ${safeBigInt(lead.form_id) ?? BigInt(0)},
+            ${safeBigInt(lead.campaign_id)},
+            ${safeBigInt(lead.adset_id)},
+            ${safeBigInt(lead.ad_id)},
+            ${'fb'}, ${leadCreatedAt.toISOString()},
             ${contact.fullName}, ${contact.firstName}, ${contact.lastName},
             ${contact.email}, ${contact.phone}, ${contact.whatsappNumber},
             ${JSON.stringify(lead.field_data)}

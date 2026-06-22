@@ -3,7 +3,7 @@ import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import { AUTH_COOKIE_NAME } from '@crm/auth-constants';
 import { config } from './config.js';
-import { proxyTo, proxyToRaw } from './lib/proxy.js';
+import { proxyTo, proxyToRaw, proxySSE } from './lib/proxy.js';
 import { authPreHandler } from './middleware/auth.js';
 import { verifyJwtEdge, revokeJti } from './lib/jwt-verify.js';
 
@@ -13,6 +13,23 @@ const app = Fastify({
     ...(config.nodeEnv !== 'production' ? { transport: { target: 'pino-pretty', options: { colorize: true } } } : {}),
   },
 });
+
+// Capture raw body alongside parsed JSON so proxyToRaw can forward
+// the original bytes for HMAC verification on Meta webhook routes.
+app.addContentTypeParser(
+  'application/json',
+  { parseAs: 'buffer' },
+  (req, body, done) => {
+    try {
+      const buf = Buffer.isBuffer(body) ? body : Buffer.from(body);
+      const parsed = JSON.parse(buf.toString('utf-8'));
+      (req as unknown as { rawBody: Buffer }).rawBody = buf;
+      done(null, parsed);
+    } catch (err) {
+      done(err as Error, undefined);
+    }
+  },
+);
 
 app.register(cookie);
 app.register(cors, {
@@ -72,6 +89,11 @@ app.post('/meta/webhook/:integrationId', async (req, reply) => {
 
 // ── Protected routes ────────────────────────────────────────────────────────
 const withAuth = { preHandler: [authPreHandler] };
+
+// Notifications (SSE — long-lived connection)
+app.get('/notifications/stream', { ...withAuth }, async (req, reply) => {
+  return proxySSE(config.notificationsServiceUrl, '/api/v1/notifications/stream', req, reply, req.userCtx);
+});
 
 // Auth
 app.post('/auth/change-password', { ...withAuth }, async (req, reply) => {

@@ -4,6 +4,7 @@ import { getIntegrationById } from '../../../services/integration.service.js';
 import { fetchLeadFromMeta } from '../../../services/meta-api.service.js';
 import { syncLeadToDatabase } from '../../../services/lead-sync.service.js';
 import { verifyHmacSignature } from '../../../lib/hmac.js';
+import { pgNotify } from '@crm/db';
 import { config } from '../../../config/index.js';
 
 const MetaWebhookBodySchema = z.object({
@@ -103,10 +104,23 @@ export async function handleWebhookPost(
 
         rawLead.field_data = rawLead.field_data ?? [];
 
+        // Meta Graph API returns created_time as an ISO string; the
+        // webhook change event carries it as a unix timestamp number.
+        // Prefer the webhook value (already a number) and fall back to
+        // parsing the Graph API string into epoch seconds.
+        let createdTime: number | undefined = change.value.created_time;
+        if (createdTime === undefined && rawLead.created_time) {
+          const parsed = typeof rawLead.created_time === 'number'
+            ? rawLead.created_time
+            : Math.floor(new Date(rawLead.created_time).getTime() / 1000);
+          if (!Number.isNaN(parsed)) createdTime = parsed;
+        }
+
         const syncResult = await syncLeadToDatabase(integration.org_id, {
           id: rawLead.id,
           form_id: rawLead.form_id ?? change.value.form_id ?? 'unknown',
           page_id: change.value.page_id,
+          ...(createdTime !== undefined ? { created_time: createdTime } : {}),
           ...(rawLead.ad_id !== undefined || change.value.ad_id !== undefined
             ? { ad_id: rawLead.ad_id ?? change.value.ad_id }
             : {}),
@@ -118,6 +132,18 @@ export async function handleWebhookPost(
         request.log.info(
           `Lead synced | metaLeadId=${leadId} marketingLeadId=${syncResult.marketingLeadId} duplicate=${syncResult.isDuplicate}`,
         );
+
+        if (!syncResult.isDuplicate) {
+          pgNotify('crm_events', {
+            type: 'lead:created',
+            lead_id: syncResult.marketingLeadId,
+            org_id: integration.org_id,
+            tenant_id: '',
+            assigned_user_id: null,
+            actor_id: 'system',
+            ts: Date.now(),
+          }).catch(() => {});
+        }
 
         results.push({ leadId, status: syncResult.isDuplicate ? 'duplicate' : 'synced' });
       } catch (leadError) {

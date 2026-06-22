@@ -1,7 +1,15 @@
-// Phase 2 Kafka stub — no-op until message broker is provisioned.
+import { pgNotify } from '@crm/db';
+
+const CHANNEL = 'crm_events';
+
 export async function publishEvent(
-  _topic: string,
-  _payload: Record<string, unknown>,
+  topic: string,
+  payload: Record<string, unknown>,
 ): Promise<void> {
-  // no-op
+  try {
+    await pgNotify(CHANNEL, { type: topic, ...payload, ts: Date.now() });
+    console.log(`[publishEvent] NOTIFY sent: ${topic} lead_id=${payload.lead_id}`);
+  } catch (err) {
+    console.error('[publishEvent] NOTIFY failed:', err);
+  }
 }
