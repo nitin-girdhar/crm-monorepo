@@ -17,7 +17,7 @@ interface LoginPageProps {
   searchParams: Promise<{ callbackUrl?: string }>;
 }
 
-const API_GATEWAY = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:4000';
+const API_GATEWAY = process.env['API_GATEWAY_INTERNAL_URL'] ?? 'http://localhost:4000';
 
 async function isAuthenticated(): Promise<boolean> {
   try {

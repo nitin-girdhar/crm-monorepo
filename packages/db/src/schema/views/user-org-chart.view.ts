@@ -14,4 +14,5 @@ export const vwUserOrgChart = iamSchema.view('vw_user_org_chart', {
   managerFullName: text('manager_full_name'),
   hierarchyLevel: integer('hierarchy_level').notNull(),
   reportingPath:  text('reporting_path'),
+  ancestorIds:    uuid('ancestor_ids').array(),
 }).existing();

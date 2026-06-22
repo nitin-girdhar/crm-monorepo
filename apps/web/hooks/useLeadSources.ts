@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { lead_sources } from '@/src/lib/api/client';
 
 export function useLeadSources() {
   const router = useRouter();
@@ -12,11 +13,8 @@ export function useLeadSources() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetch('/api/lead-sources', { cache: 'no-store' })
-      .then(async (r) => {
-        if (r.status === 401) { router.replace('/login'); return; }
-        if (!r.ok) throw new Error(`Failed to load lead sources (${r.status})`);
-        const json = await r.json() as { data?: unknown };
+    lead_sources.list()
+      .then((json) => {
         if (cancelled) return;
         const data = json.data;
         if (Array.isArray(data)) {
@@ -29,7 +27,10 @@ export function useLeadSources() {
         setError(null);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load lead sources');
+        if (cancelled) return;
+        const status = (err as { status?: number }).status;
+        if (status === 401) { router.replace('/login'); return; }
+        setError(err instanceof Error ? err.message : 'Failed to load lead sources');
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { SessionUser } from "@crm/types";
 import type { AssignmentView } from "@/src/types/leads";
+import { assignments as assignmentsApi, leads as leadsApi } from "@/src/lib/api/client";
 import { useBranches } from "@/hooks/useBranches";
 import Modal from "@/components/users/Modal";
 import AssignmentSelector from "./AssignmentSelector";
@@ -92,22 +93,10 @@ export default function AssignLeadModal({
       }
       setPending(true);
       try {
-        const res = await fetch(`/api/assignments/${existing!.id}`, {
-          method: "PATCH",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            assigned_to: assignedTo,
-            notes: notes.trim(),
-          }),
+        await assignmentsApi.update(existing!.id, {
+          assigned_to: assignedTo,
+          notes: notes.trim(),
         });
-        if (!res.ok) {
-          const data = (await res.json().catch(() => null)) as {
-            error?: string;
-          } | null;
-          setError(data?.error ?? "Failed to save assignment.");
-          return;
-        }
         close();
       } catch (err) {
         setError(err instanceof Error ? err.message : "Network error.");
@@ -151,40 +140,25 @@ export default function AssignLeadModal({
 
     setPending(true);
     try {
-      const res = await fetch("/api/leads", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          firstName: firstName.trim(),
-          lastName: lastName.trim() || undefined,
-          phone: phone.trim(),
-          email: email.trim() || undefined,
-          orgId: branchId,
-          assignedUserId: assignedTo,
-          metadata: { source: "walk-in", initial_notes: notes.trim() },
-        }),
+      await leadsApi.create({
+        firstName: firstName.trim(),
+        lastName: lastName.trim() || undefined,
+        phone: phone.trim(),
+        email: email.trim() || undefined,
+        orgId: branchId,
+        assignedUserId: assignedTo,
+        metadata: { source: "walk-in", initial_notes: notes.trim() },
       });
-
-      if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as {
-          error?: string;
-          field?: string;
-        } | null;
-        if (data?.field === "phone") {
-          setPhoneError(
-            data.error ?? "Phone number already exists in this branch.",
-          );
-        } else if (data?.field === "email") {
-          setEmailError(data.error ?? "Email already exists in this branch.");
-        } else {
-          setError(data?.error ?? "Failed to create lead.");
-        }
-        return;
-      }
       close();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Network error.");
+    } catch (err: unknown) {
+      const body = (err as { body?: { error?: string; field?: string } }).body;
+      if (body?.field === "phone") {
+        setPhoneError(body.error ?? "Phone number already exists in this branch.");
+      } else if (body?.field === "email") {
+        setEmailError(body.error ?? "Email already exists in this branch.");
+      } else {
+        setError(err instanceof Error ? err.message : "Network error.");
+      }
     } finally {
       setPending(false);
     }
@@ -195,17 +169,7 @@ export default function AssignLeadModal({
     setError(null);
     setPending(true);
     try {
-      const res = await fetch(`/api/assignments/${existing.id}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as {
-          error?: string;
-        } | null;
-        setError(data?.error ?? "Failed to unassign.");
-        return;
-      }
+      await assignmentsApi.remove(existing.id);
       close();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Network error.");

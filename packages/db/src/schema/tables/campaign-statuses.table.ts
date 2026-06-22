@@ -4,6 +4,6 @@ import { marketingSchema } from '../pg-schemas';
 
 export const campaignStatusesTable = marketingSchema.table('campaign_statuses', {
   id:          uuid('id').primaryKey().default(sql`gen_uuidv7()`),
-  name:        text('name').notNull(),
+  name:        text('name').notNull().unique(),
   description: text('description'),
 });

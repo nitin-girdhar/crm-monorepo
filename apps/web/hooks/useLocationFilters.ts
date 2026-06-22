@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { locations as locationsApi } from '@/src/lib/api/client';
 
 export interface LocationOption {
   id: number;
@@ -26,12 +27,18 @@ interface UseLocationFiltersReturn {
   loadingCities: boolean;
 }
 
-async function fetchLocations(url: string, router: ReturnType<typeof useRouter>): Promise<LocationOption[]> {
-  const r = await fetch(url, { cache: 'no-store' });
-  if (r.status === 401) { router.replace('/login'); return []; }
-  if (!r.ok) throw new Error(`Failed to load locations (${r.status})`);
-  const json = await r.json() as { data?: unknown };
-  return Array.isArray(json.data) ? (json.data as LocationOption[]) : [];
+async function fetchLocations(
+  params: { level?: string; countryIds?: string; stateIds?: string },
+  router: ReturnType<typeof useRouter>,
+): Promise<LocationOption[]> {
+  try {
+    const json = await locationsApi.list(params);
+    return Array.isArray(json.data) ? (json.data as LocationOption[]) : [];
+  } catch (err) {
+    const status = (err as { status?: number }).status;
+    if (status === 401) { router.replace('/login'); return []; }
+    throw err;
+  }
 }
 
 export function useLocationFilters(): UseLocationFiltersReturn {
@@ -52,7 +59,7 @@ export function useLocationFilters(): UseLocationFiltersReturn {
   useEffect(() => {
     let cancelled = false;
     setLoadingCountries(true);
-    fetchLocations('/api/locations?level=countries', router)
+    fetchLocations({ level: 'countries' }, router)
       .then((data) => { if (!cancelled) setCountries(data); })
       .catch(() => { if (!cancelled) setCountries([]); })
       .finally(() => { if (!cancelled) setLoadingCountries(false); });
@@ -64,7 +71,7 @@ export function useLocationFilters(): UseLocationFiltersReturn {
     if (!countryKey) { setStates([]); return; }
     let cancelled = false;
     setLoadingStates(true);
-    fetchLocations(`/api/locations?level=states&countryIds=${countryKey}`, router)
+    fetchLocations({ level: 'states', countryIds: countryKey }, router)
       .then((data) => { if (!cancelled) setStates(data); })
       .catch(() => { if (!cancelled) setStates([]); })
       .finally(() => { if (!cancelled) setLoadingStates(false); });
@@ -76,7 +83,7 @@ export function useLocationFilters(): UseLocationFiltersReturn {
     if (!stateKey) { setCities([]); return; }
     let cancelled = false;
     setLoadingCities(true);
-    fetchLocations(`/api/locations?level=cities&stateIds=${stateKey}`, router)
+    fetchLocations({ level: 'cities', stateIds: stateKey }, router)
       .then((data) => { if (!cancelled) setCities(data); })
       .catch(() => { if (!cancelled) setCities([]); })
       .finally(() => { if (!cancelled) setLoadingCities(false); });

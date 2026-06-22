@@ -3,6 +3,11 @@ import { withServiceTx, withRoleTx } from '@crm/db';
 import type { RoleTxContext } from '@crm/db';
 import { marketingLeadsTable, leadStageTable, leadStageOutcomeTable } from '@crm/db/schema';
 
+function sqlUuidArr(arr: string[]) {
+  if (arr.length === 0) return sql`'{}'::uuid[]`;
+  return sql`ARRAY[${sql.join(arr.map(v => sql`${v}::uuid`), sql`, `)}]`;
+}
+
 const ASSIGNMENT_SELECT = sql`
   SELECT
     ml.id               AS id,
@@ -27,9 +32,9 @@ const ASSIGNMENT_SELECT = sql`
   WHERE NOT ml.is_deleted AND ml.assigned_user_id IS NOT NULL
 `;
 
-export async function listAllAssignments(orgIds: string[] | null, page: number, pageSize: number) {
+export async function listAllAssignments(ctx: RoleTxContext, orgIds: string[] | null, page: number, pageSize: number) {
   const offset = (page - 1) * pageSize;
-  return withServiceTx(async (tx) => {
+  return withRoleTx(ctx, async (tx) => {
     const rows = orgIds === null
       ? (await tx.execute(sql`
           ${ASSIGNMENT_SELECT}
@@ -37,7 +42,7 @@ export async function listAllAssignments(orgIds: string[] | null, page: number, 
         `)) as Array<Record<string, unknown>>
       : (await tx.execute(sql`
           ${ASSIGNMENT_SELECT}
-          AND ml.org_id = ANY(${orgIds}::uuid[])
+          AND ml.org_id = ANY(${sqlUuidArr(orgIds)})
           ORDER BY ml.updated_at DESC LIMIT ${pageSize} OFFSET ${offset}
         `)) as Array<Record<string, unknown>>;
     const total = rows[0] ? Number(rows[0]['total_count'] ?? 0) : 0;
@@ -45,12 +50,12 @@ export async function listAllAssignments(orgIds: string[] | null, page: number, 
   });
 }
 
-export async function listMyAssignments(userId: string, orgId: string, page: number, pageSize: number) {
+export async function listMyAssignments(ctx: RoleTxContext, page: number, pageSize: number) {
   const offset = (page - 1) * pageSize;
-  return withServiceTx(async (tx) => {
+  return withRoleTx(ctx, async (tx) => {
     const rows = (await tx.execute(sql`
       ${ASSIGNMENT_SELECT}
-      AND ml.assigned_user_id = ${userId}::uuid AND ml.org_id = ${orgId}::uuid
+      AND ml.assigned_user_id = ${ctx.user_id}::uuid AND ml.org_id = ${ctx.org_id}::uuid
       ORDER BY ml.updated_at DESC LIMIT ${pageSize} OFFSET ${offset}
     `)) as Array<Record<string, unknown>>;
     const total = rows[0] ? Number(rows[0]['total_count'] ?? 0) : 0;
@@ -58,8 +63,8 @@ export async function listMyAssignments(userId: string, orgId: string, page: num
   });
 }
 
-export async function getAssignmentById(id: string) {
-  return withServiceTx(async (tx) => {
+export async function getAssignmentById(ctx: RoleTxContext, id: string) {
+  return withRoleTx(ctx, async (tx) => {
     const rows = (await tx.execute(sql`
       SELECT ml.id, ml.id AS lead_id, o.name AS branch,
              ml.assigned_user_id AS assigned_to,
@@ -91,11 +96,11 @@ export async function getUserForAssignment(ctx: RoleTxContext, targetUserId: str
   });
 }
 
-export async function assignLead(data: {
+export async function assignLead(ctx: RoleTxContext, data: {
   lead_id: string;
   assigned_to: string;
 }) {
-  return withServiceTx(async (tx) => {
+  return withRoleTx(ctx, async (tx) => {
     const rows = (await tx.execute(sql`
       UPDATE crm.marketing_leads
       SET assigned_user_id = ${data.assigned_to}::uuid
@@ -107,11 +112,11 @@ export async function assignLead(data: {
   });
 }
 
-export async function reassignLead(data: {
+export async function reassignLead(ctx: RoleTxContext, data: {
   lead_id: string;
   assigned_to: string;
 }) {
-  return withServiceTx(async (tx) => {
+  return withRoleTx(ctx, async (tx) => {
     const [before] = (await tx.execute(sql`
       SELECT assigned_user_id FROM crm.marketing_leads WHERE id = ${data.lead_id}::uuid AND NOT is_deleted
     `)) as Array<{ assigned_user_id: string | null }>;
@@ -127,8 +132,8 @@ export async function reassignLead(data: {
   });
 }
 
-export async function unassignLead(leadId: string) {
-  return withServiceTx(async (tx) => {
+export async function unassignLead(ctx: RoleTxContext, leadId: string) {
+  return withRoleTx(ctx, async (tx) => {
     const rows = (await tx.execute(sql`
       UPDATE crm.marketing_leads
       SET assigned_user_id = NULL
@@ -153,24 +158,20 @@ export interface LeadsHistoryFilters {
   pageSize: number;
 }
 
-function pgArray(arr: string[]): string {
-  return `{${arr.join(',')}}`;
-}
-
-export async function listAssignmentsFiltered(filters: LeadsHistoryFilters) {
+export async function listAssignmentsFiltered(ctx: RoleTxContext, filters: LeadsHistoryFilters) {
   const offset = (filters.page - 1) * filters.pageSize;
 
-  return withServiceTx(async (tx) => {
+  return withRoleTx(ctx, async (tx) => {
     const conditions: ReturnType<typeof sql>[] = [
       sql`NOT ml.is_deleted`,
       sql`ml.assigned_user_id IS NOT NULL`,
     ];
 
     if (filters.userIds?.length) {
-      conditions.push(sql`ml.assigned_user_id = ANY(${pgArray(filters.userIds)}::uuid[])`);
+      conditions.push(sql`ml.assigned_user_id = ANY(${sqlUuidArr(filters.userIds)})`);
     }
     if (filters.orgIds !== null && filters.orgIds.length > 0) {
-      conditions.push(sql`ml.org_id = ANY(${pgArray(filters.orgIds)}::uuid[])`);
+      conditions.push(sql`ml.org_id = ANY(${sqlUuidArr(filters.orgIds)})`);
     }
     if (filters.dateFrom) {
       conditions.push(sql`ml.created_at >= ${filters.dateFrom}::timestamptz`);
@@ -179,10 +180,10 @@ export async function listAssignmentsFiltered(filters: LeadsHistoryFilters) {
       conditions.push(sql`ml.created_at <= (${filters.dateTo}::date + INTERVAL '1 day')`);
     }
     if (filters.stageIds?.length) {
-      conditions.push(sql`ml.stage_id = ANY(${pgArray(filters.stageIds)}::uuid[])`);
+      conditions.push(sql`ml.stage_id = ANY(${sqlUuidArr(filters.stageIds)})`);
     }
     if (filters.outcomeIds?.length) {
-      conditions.push(sql`ml.outcome_id = ANY(${pgArray(filters.outcomeIds)}::uuid[])`);
+      conditions.push(sql`ml.outcome_id = ANY(${sqlUuidArr(filters.outcomeIds)})`);
     }
     if (filters.activeOnly) {
       conditions.push(sql`ls.is_terminated = FALSE`);
@@ -252,8 +253,8 @@ export async function getStageAndOutcomeOptions() {
   });
 }
 
-export async function getTeamMemberIds(managerId: string, orgId: string): Promise<string[]> {
-  return withServiceTx(async (tx) => {
+export async function getTeamMemberIds(ctx: RoleTxContext, managerId: string, orgId: string): Promise<string[]> {
+  return withRoleTx(ctx, async (tx) => {
     const rows = (await tx.execute(sql`
       SELECT member_id FROM iam.vw_user_team_members
       WHERE manager_id = ${managerId}::uuid AND org_id = ${orgId}::uuid

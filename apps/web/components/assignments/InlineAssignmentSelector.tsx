@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import type { SessionUser } from '@crm/types';
 import type { AssignmentView } from '@/src/types/leads';
 import { ROLE_LABELS } from '@crm/auth-constants';
+import { leads as leadsApi } from '@/src/lib/api/client';
 import { useDismissible } from '@/hooks/useDropdown';
 
 interface Props {
@@ -113,17 +114,7 @@ export default function InlineAssignmentSelector({
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(`/api/leads/${leadId}`, {
-        method: 'PATCH',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assignedUserId: userId }),
-      });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as { error?: string } | null;
-        setError(data?.error ?? 'Failed to assign');
-        return;
-      }
+      await leadsApi.update(leadId, { assignedUserId: userId });
       onChanged();
       setOpen(false);
     } catch (err) {
@@ -138,17 +129,7 @@ export default function InlineAssignmentSelector({
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(`/api/leads/${leadId}`, {
-        method: 'PATCH',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assignedUserId: null }),
-      });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as { error?: string } | null;
-        setError(data?.error ?? 'Failed to unassign');
-        return;
-      }
+      await leadsApi.update(leadId, { assignedUserId: null });
       onChanged();
       setOpen(false);
     } catch (err) {

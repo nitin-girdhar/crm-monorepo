@@ -494,6 +494,18 @@ DROP TRIGGER IF EXISTS trg_tenants_soft_delete  ON entity.tenants;
 CREATE TRIGGER trg_tenants_soft_delete
   BEFORE DELETE ON entity.tenants FOR EACH ROW EXECUTE FUNCTION public.soft_delete_row();
 
+ALTER TABLE entity.tenants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE entity.tenants FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_self_policy ON entity.tenants
+  AS PERMISSIVE FOR SELECT TO app_user
+  USING (id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
+
+CREATE POLICY tenant_admin_self_policy ON entity.tenants
+  AS PERMISSIVE FOR ALL TO tenant_admin
+  USING (id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
+  WITH CHECK (id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
+
 -- ── ORGANIZATIONS ─────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS entity.organizations (
   id            UUID    PRIMARY KEY DEFAULT public.gen_uuidv7(),
@@ -2776,11 +2788,23 @@ CREATE TABLE IF NOT EXISTS ext.meta_org_config (
 );
 
 ALTER TABLE ext.meta_org_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ext.meta_org_config FORCE ROW LEVEL SECURITY;
 
 CREATE POLICY org_isolation_policy ON ext.meta_org_config
   FOR ALL TO app_user
   USING  (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid)
   WITH CHECK (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
+
+CREATE POLICY tenant_isolation_policy ON ext.meta_org_config
+  AS PERMISSIVE FOR ALL TO tenant_admin
+  USING (org_id IN (
+    SELECT id FROM entity.organizations
+    WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+  ))
+  WITH CHECK (org_id IN (
+    SELECT id FROM entity.organizations
+    WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+  ));
 
 -- ── META_LEADS: raw Meta lead data linked to crm.marketing_leads ──────
 CREATE TABLE IF NOT EXISTS ext.meta_leads (
@@ -2812,11 +2836,23 @@ CREATE INDEX IF NOT EXISTS idx_meta_leads_mktg_lead    ON ext.meta_leads (market
 CREATE INDEX IF NOT EXISTS idx_meta_leads_created      ON ext.meta_leads (created_at DESC);
 
 ALTER TABLE ext.meta_leads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ext.meta_leads FORCE ROW LEVEL SECURITY;
 
 CREATE POLICY org_isolation_policy ON ext.meta_leads
   FOR ALL TO app_user
   USING  (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid)
   WITH CHECK (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
+
+CREATE POLICY tenant_isolation_policy ON ext.meta_leads
+  AS PERMISSIVE FOR ALL TO tenant_admin
+  USING (org_id IN (
+    SELECT id FROM entity.organizations
+    WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+  ))
+  WITH CHECK (org_id IN (
+    SELECT id FROM entity.organizations
+    WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+  ));
 
 -- ── META_LEAD_CUSTOM_FIELDS: unmapped form fields (1:many) ────────
 CREATE TABLE IF NOT EXISTS ext.meta_lead_custom_fields (
@@ -2829,11 +2865,23 @@ CREATE TABLE IF NOT EXISTS ext.meta_lead_custom_fields (
 );
 
 ALTER TABLE ext.meta_lead_custom_fields ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ext.meta_lead_custom_fields FORCE ROW LEVEL SECURITY;
 
 CREATE POLICY org_isolation_policy ON ext.meta_lead_custom_fields
   FOR ALL TO app_user
   USING  (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid)
   WITH CHECK (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
+
+CREATE POLICY tenant_isolation_policy ON ext.meta_lead_custom_fields
+  AS PERMISSIVE FOR ALL TO tenant_admin
+  USING (org_id IN (
+    SELECT id FROM entity.organizations
+    WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+  ))
+  WITH CHECK (org_id IN (
+    SELECT id FROM entity.organizations
+    WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+  ));
 
 -- ── META_CAPI_OUTBOUND_LOGS: CAPI event audit trail ──────────────
 CREATE TABLE IF NOT EXISTS ext.meta_capi_outbound_logs (
@@ -2861,11 +2909,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS uix_capi_logs_lead_event_success
   WHERE delivery_status = 'SUCCESS';
 
 ALTER TABLE ext.meta_capi_outbound_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ext.meta_capi_outbound_logs FORCE ROW LEVEL SECURITY;
 
 CREATE POLICY org_isolation_policy ON ext.meta_capi_outbound_logs
   FOR ALL TO app_user
   USING  (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid)
   WITH CHECK (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
+
+CREATE POLICY tenant_isolation_policy ON ext.meta_capi_outbound_logs
+  AS PERMISSIVE FOR ALL TO tenant_admin
+  USING (org_id IN (
+    SELECT id FROM entity.organizations
+    WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+  ))
+  WITH CHECK (org_id IN (
+    SELECT id FROM entity.organizations
+    WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+  ));
 
 -- ── VIEW: complete meta leads joined to crm.marketing_leads ───────────
 CREATE OR REPLACE VIEW ext.view_meta_leads_complete

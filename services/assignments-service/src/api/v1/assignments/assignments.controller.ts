@@ -43,8 +43,9 @@ export class AssignmentsController {
   };
 
   getById = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { org_id, user_id, role, tenant_id } = request.auth;
     const { id } = request.params as { id: string };
-    const assignment = await service.getAssignmentById(id);
+    const assignment = await service.getAssignmentById({ org_id, user_id, role, tenant_id }, id);
     return reply.send({ success: true, data: assignment });
   };
 

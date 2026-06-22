@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { LeadView } from '@crm/types';
+import { followUps as followUpsApi } from '@/src/lib/api/client';
 import { LeadHistoryModal } from '@/components/LeadHistoryModal';
 
 interface FollowUpEnriched {
@@ -70,18 +71,14 @@ export function FollowUpPipeline({ assignedRepId, overdueOnly }: Props) {
   const fetchPipeline = useCallback(() => {
     setLoading(true);
     setError(null);
-    const params = new URLSearchParams();
-    if (assignedRepId) params.set('assignedRepId', assignedRepId);
-    if (overdueOnly) params.set('overdueOnly', 'true');
+    const params: { assignedRepId?: string; overdueOnly?: string } = {};
+    if (assignedRepId) params.assignedRepId = assignedRepId;
+    if (overdueOnly) params.overdueOnly = 'true';
 
-    fetch(`/api/follow-ups?${params}`, { credentials: 'include' })
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((d) => {
-        const body = d as { data?: FollowUpEnriched[]; pipeline?: FollowUpEnriched[] };
-        setPipeline(body.data ?? body.pipeline ?? []);
+    followUpsApi.list(params)
+      .then((body) => {
+        const data = (body.data ?? body.pipeline ?? []) as FollowUpEnriched[];
+        setPipeline(data);
       })
       .catch((err) => setError((err as Error).message ?? 'Failed to load follow-ups'))
       .finally(() => setLoading(false));

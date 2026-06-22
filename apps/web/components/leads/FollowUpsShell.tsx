@@ -6,6 +6,7 @@ import { AgGridReact } from 'ag-grid-react';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
 import type { ColDef, ICellRendererParams } from 'ag-grid-community';
 import type { SessionUser } from '@crm/types';
+import { followUps as followUpsApi } from '@/src/lib/api/client';
 import { LeadHistoryModal } from '@/components/LeadHistoryModal';
 import DownloadButton from '@/components/common/DownloadButton';
 import { buildFilename, exportRows, type ExportColumn, type ExportFormat } from '@/src/lib/export/export';
@@ -75,13 +76,12 @@ export default function FollowUpsShell({ actor }: Props) {
 
   const fetchData = useCallback(() => {
     setLoading(true);
-    const params = new URLSearchParams();
-    if (isSalesRep) params.set('assignedRepId', actor.id);
-    fetch(`/api/follow-ups?${params}`, { credentials: 'include' })
-      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then((d) => {
-        const body = d as { data?: FollowUpItem[]; pipeline?: FollowUpItem[] };
-        setAll(body.data ?? body.pipeline ?? []);
+    const params: { assignedRepId?: string } = {};
+    if (isSalesRep) params.assignedRepId = actor.id;
+    followUpsApi.list(params)
+      .then((body) => {
+        const data = (body.data ?? body.pipeline ?? []) as FollowUpItem[];
+        setAll(data);
       })
       .catch((err) => setError((err as Error).message))
       .finally(() => setLoading(false));

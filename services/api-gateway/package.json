@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@crm/auth-constants": "workspace:*",
+    "@crm/db": "workspace:*",
     "@crm/permissions": "workspace:*",
     "@crm/types": "workspace:*",
     "@fastify/cookie": "^11.0.2",

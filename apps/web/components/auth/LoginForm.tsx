@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import { auth } from '@/src/lib/api/client';
 
 interface Props {
   callbackUrl: string;
@@ -34,19 +35,7 @@ export default function LoginForm({ callbackUrl }: Props) {
 
     setSubmitting(true);
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password }),
-        credentials: 'include',
-      });
-
-      if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as { error?: string } | null;
-        setServerError(data?.error ?? 'Sign-in failed. Please try again.');
-        setSubmitting(false);
-        return;
-      }
+      await auth.login(email.trim(), password);
 
       startTransition(() => {
         router.replace(callbackUrl);

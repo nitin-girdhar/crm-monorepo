@@ -4,7 +4,7 @@ import { crmSchema } from '../pg-schemas';
 
 export const leadStageTable = crmSchema.table('lead_stage', {
   id:               uuid('id').primaryKey().default(sql`gen_uuidv7()`),
-  name:             text('name').notNull(),
+  name:             text('name').notNull().unique(),
   label:            text('label').notNull(),
   description:      text('description'),
   sortOrder:        integer('sort_order').notNull().default(0),

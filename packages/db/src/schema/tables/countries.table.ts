@@ -3,7 +3,7 @@ import { geoSchema } from '../pg-schemas';
 
 export const countriesTable = geoSchema.table('countries', {
   id:          smallint('id').primaryKey().generatedAlwaysAsIdentity(),
-  name:        text('name').notNull(),
-  isoCode:     varchar('iso_code', { length: 2 }).notNull(),
+  name:        text('name').notNull().unique(),
+  isoCode:     varchar('iso_code', { length: 2 }).notNull().unique(),
   description: text('description'),
 });

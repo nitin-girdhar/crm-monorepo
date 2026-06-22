@@ -16,7 +16,7 @@ export class AuthController {
 
   logout = async (request: FastifyRequest, reply: FastifyReply) => {
     const token = request.cookies[AUTH_COOKIE_NAME];
-    service.logout(token);
+    await service.logout(token);
     return reply
       .setCookie(AUTH_COOKIE_NAME, '', clearedSessionCookieOptions())
       .status(200)

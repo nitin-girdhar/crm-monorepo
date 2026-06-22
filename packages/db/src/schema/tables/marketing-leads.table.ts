@@ -1,10 +1,20 @@
 import { uuid, text, boolean, timestamp, jsonb, integer, smallint } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { crmSchema } from '../pg-schemas';
+import { organizationsTable } from './organizations.table';
+import { citiesTable } from './cities.table';
+import { statesTable } from './states.table';
+import { countriesTable } from './countries.table';
+import { leadStageTable } from './lead-stage.table';
+import { leadStageOutcomeTable } from './lead-stage-outcome.table';
+import { adCampaignsTable } from './ad-campaigns.table';
+import { leadSourcesTable } from './lead-sources.table';
+import { branchesTable } from './branches.table';
+import { usersTable } from './users.table';
 
 export const marketingLeadsTable = crmSchema.table('marketing_leads', {
   id:              uuid('id').primaryKey().default(sql`gen_uuidv7()`),
-  orgId:           uuid('org_id').notNull(),
+  orgId:           uuid('org_id').notNull().references(() => organizationsTable.id, { onDelete: 'restrict' }),
   firstName:       text('first_name').notNull(),
   middleName:      text('middle_name'),
   lastName:        text('last_name').notNull().default(''),
@@ -18,17 +28,17 @@ export const marketingLeadsTable = crmSchema.table('marketing_leads', {
   landmark:        text('landmark'),
   pincode:         text('pincode'),
   city:            text('city'),
-  cityId:          integer('city_id'),
-  stateId:         smallint('state_id'),
-  countryId:       smallint('country_id'),
-  stageId:         uuid('stage_id'),
-  outcomeId:       uuid('outcome_id'),
+  cityId:          integer('city_id').references(() => citiesTable.id, { onDelete: 'restrict' }),
+  stateId:         smallint('state_id').references(() => statesTable.id, { onDelete: 'restrict' }),
+  countryId:       smallint('country_id').references(() => countriesTable.id, { onDelete: 'restrict' }),
+  stageId:         uuid('stage_id').references(() => leadStageTable.id, { onDelete: 'restrict' }),
+  outcomeId:       uuid('outcome_id').references(() => leadStageOutcomeTable.id, { onDelete: 'restrict' }),
   outcomeComment:  text('outcome_comment'),
-  campaignId:      uuid('campaign_id'),
-  sourceId:        uuid('source_id'),
-  branchId:        uuid('branch_id'),
-  assignedUserId:  uuid('assigned_user_id'),
-  duplicateLeadId: uuid('duplicate_lead_id'),
+  campaignId:      uuid('campaign_id').references(() => adCampaignsTable.id, { onDelete: 'set null' }),
+  sourceId:        uuid('source_id').references(() => leadSourcesTable.id),
+  branchId:        uuid('branch_id').references(() => branchesTable.id),
+  assignedUserId:  uuid('assigned_user_id').references(() => usersTable.id, { onDelete: 'set null' }),
+  duplicateLeadId: uuid('duplicate_lead_id').references((): any => marketingLeadsTable.id, { onDelete: 'set null' }),
   rawWebhookData:  jsonb('raw_webhook_data').notNull().default({}),
   metadata:        jsonb('metadata').notNull().default({}),
   tags:            text('tags').array().notNull().default(sql`'{}'`),

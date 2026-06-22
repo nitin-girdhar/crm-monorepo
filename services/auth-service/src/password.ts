@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { config } from './config.js';
 
@@ -17,7 +18,11 @@ export async function comparePassword(
 }
 
 export function generateTemporaryPassword(): string {
-  const upper = Math.floor(Math.random() * 0xffff).toString(16).padStart(4, '0').toUpperCase();
-  const lower = Math.floor(Math.random() * 0xffff).toString(16).padStart(4, '0').toLowerCase();
-  return `${upper}${lower}@1`;
+  const bytes = crypto.randomBytes(12);
+  const charset = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  let password = '';
+  for (const b of bytes) {
+    password += charset[b % charset.length];
+  }
+  return `${password}@1`;
 }

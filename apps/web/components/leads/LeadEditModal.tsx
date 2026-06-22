@@ -113,12 +113,7 @@ export function LeadEditModal({
       if (fuFieldChanged && nextFollowUp) {
         const fuBody: Record<string, unknown> = { action: 'reschedule', notes: transitionNote.trim() };
         if (editedFuDate) fuBody.scheduledAt = new Date(editedFuDate).toISOString();
-        await fetch(`/api/leads/${lead.lead_id}/follow-ups/${nextFollowUp.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(fuBody),
-          credentials: 'include',
-        });
+        await leadsApi.updateFollowUp(lead.lead_id, nextFollowUp.id, fuBody);
       }
 
       onAssignmentChanged();
@@ -144,11 +139,11 @@ export function LeadEditModal({
   const [nextFollowUp, setNextFollowUp] = useState<FollowUpInfo | null>(null);
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/leads/${lead.lead_id}/follow-ups`, { credentials: 'include' })
-      .then(async (res) => {
-        if (!res.ok || cancelled) return;
-        const json = await res.json() as { data?: FollowUpInfo[] };
-        const pending = (json.data ?? []).find(f => f.status_name === 'pending');
+    leadsApi.getFollowUps(lead.lead_id)
+      .then((res: { data: unknown[] }) => {
+        if (cancelled) return;
+        const list = (res.data ?? []) as FollowUpInfo[];
+        const pending = list.find(f => f.status_name === 'pending');
         if (!cancelled) setNextFollowUp(pending ?? null);
       })
       .catch(() => {});

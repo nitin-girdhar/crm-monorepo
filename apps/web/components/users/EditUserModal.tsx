@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { SessionUser, UserRole } from '@crm/types';
+import { users as usersApi } from '@/src/lib/api/client';
 import Modal from './Modal';
 import RoleSelector from './RoleSelector';
 import ResetPasswordModal from './ResetPasswordModal';
@@ -58,17 +59,7 @@ export default function EditUserModal({ open, onClose, user, currentUserId, acto
     setError(null);
     setPending(true);
     try {
-      const res = await fetch(`/api/users/${user.id}`, {
-        method: 'PATCH',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(patch),
-      });
-      const data = (await res.json().catch(() => null)) as { error?: string } | null;
-      if (!res.ok) {
-        setError(data?.error ?? 'Failed to update user.');
-        return false;
-      }
+      await usersApi.update(user.id, patch);
       router.refresh();
       return true;
     } catch (err) {

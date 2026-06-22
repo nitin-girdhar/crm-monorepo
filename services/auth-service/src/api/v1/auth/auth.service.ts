@@ -70,11 +70,15 @@ export async function login(input: LoginInput): Promise<LoginResult> {
   };
 }
 
-export function logout(token: string | undefined): void {
+export async function logout(token: string | undefined): Promise<void> {
   if (!token) return;
   const result = verifyJwt(token);
   if (result.ok && result.payload.jti && result.payload.exp) {
-    revokeJti(result.payload.jti, result.payload.exp);
+    await revokeJti(result.payload.jti, result.payload.exp, {
+      user_id: result.payload.sub,
+      org_id: result.payload.org_id,
+      tenant_id: result.payload.tenant_id,
+    });
     void logActivity({ action_type: 'logout', performed_by: result.payload.sub });
   }
 }
@@ -89,7 +93,12 @@ export async function getSession(
   const result = verifyJwt(token);
   if (!result.ok) throw new UnauthorizedError('Session expired');
 
-  if (result.payload.jti && isJtiRevoked(result.payload.jti)) {
+  if (result.payload.jti && await isJtiRevoked(result.payload.jti, {
+    user_id: result.payload.sub,
+    org_id: result.payload.org_id,
+    tenant_id: result.payload.tenant_id,
+    ...(result.payload.iat !== undefined ? { issued_at: result.payload.iat } : {}),
+  })) {
     throw new UnauthorizedError('Session has been revoked. Please log in again.');
   }
 

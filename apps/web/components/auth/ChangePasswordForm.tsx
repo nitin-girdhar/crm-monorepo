@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { auth } from '@/src/lib/api/client';
 
 interface Props {
   forced: boolean;
@@ -55,18 +56,7 @@ export default function ChangePasswordForm({ forced }: Props) {
     if (!canSubmit) return;
     setSubmitting(true);
     try {
-      const res = await fetch('/api/auth/change-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ current_password: current, new_password: next, confirm }),
-        credentials: 'include',
-      });
-      const data = (await res.json().catch(() => null)) as { error?: string } | null;
-      if (!res.ok) {
-        setError(data?.error ?? 'Failed to change password.');
-        setSubmitting(false);
-        return;
-      }
+      await auth.changePassword(current, next);
       setCurrent(''); setNext(''); setConfirm('');
       router.replace('/dashboard/leads');
       router.refresh();

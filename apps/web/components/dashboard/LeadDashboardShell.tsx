@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { SessionUser } from '@crm/types';
+import { users as usersApi } from '@/src/lib/api/client';
 import { useBranches, type DynamicBranch } from '@/hooks/useBranches';
 import { useLeads } from '@/hooks/useLeads';
 import { useLocationFilters } from '@/hooks/useLocationFilters';
@@ -116,11 +117,9 @@ export default function LeadDashboardShell({ actor }: Props) {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/users/assignable', { credentials: 'include', cache: 'no-store' });
-        if (!res.ok) { if (!cancelled) setCandidates([]); return; }
-        const json = (await res.json()) as { data?: Record<string, unknown>[] };
+        const json = await usersApi.assignable();
         if (cancelled) return;
-        const raw = Array.isArray(json.data) ? json.data : [];
+        const raw = Array.isArray(json.data) ? json.data as Record<string, unknown>[] : [];
         setCandidates(raw.map((u) => ({
           ...u,
           name: (u.full_name ?? u.name ?? '') as string,

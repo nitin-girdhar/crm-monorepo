@@ -15,10 +15,10 @@ export async function revokeJti(
 ): Promise<void> {
   await revokeToken({
     jti,
-    user_id: payload.user_id,
-    org_id: payload.org_id,
-    tenant_id: payload.tenant_id,
     expires_at: new Date(exp * 1000),
+    ...(payload.user_id ? { user_id: payload.user_id } : {}),
+    ...(payload.org_id ? { org_id: payload.org_id } : {}),
+    ...(payload.tenant_id ? { tenant_id: payload.tenant_id } : {}),
   });
 }
 
@@ -42,7 +42,7 @@ export async function verifyJwtEdge(token: string): Promise<JwtVerifyResult> {
         user_id: typed.sub,
         org_id: typed.org_id,
         tenant_id: typed.tenant_id,
-        issued_at: typed.iat,
+        ...(typed.iat !== undefined ? { issued_at: typed.iat } : {}),
       });
       if (revoked) return { ok: false, reason: 'invalid' };
     }

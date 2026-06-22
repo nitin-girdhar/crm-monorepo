@@ -6,7 +6,7 @@ import { getRulesForTenant, canSeeAssignedToFilter, getLeadsHistoryAssignedToSco
 import type { AssignmentView, StageOption, StageOutcome } from '@/src/types/leads';
 import { useLeadsHistory } from '@/hooks/useLeadsHistory';
 import type { LeadsHistoryFilters } from '@/hooks/useLeadsHistory';
-import { users as usersApi } from '@/src/lib/api/client';
+import { users as usersApi, branches as branchesApi } from '@/src/lib/api/client';
 import Pagination from '@/components/common/Pagination';
 import DownloadButton from '@/components/common/DownloadButton';
 import AssigneeBadge from '@/components/assignments/AssigneeBadge';
@@ -107,10 +107,8 @@ export default function LeadsHistoryShell({ actor }: Props) {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/branches/all', { credentials: 'include', cache: 'no-store' });
-        if (!res.ok || cancelled) return;
-        const json = await res.json() as { data?: BranchOption[] };
-        if (!cancelled) setBranches(Array.isArray(json.data) ? json.data : []);
+        const json = await branchesApi.all();
+        if (!cancelled) setBranches(Array.isArray(json.data) ? json.data as BranchOption[] : []);
       } catch { /* ignore */ }
     })();
     return () => { cancelled = true; };
@@ -132,10 +130,9 @@ export default function LeadsHistoryShell({ actor }: Props) {
           members.unshift({ id: actor.id, label: `${actor.name} (me)` });
           setAssignableUsers(members);
         } else {
-          const res = await fetch('/api/users', { credentials: 'include', cache: 'no-store' });
-          if (!res.ok || cancelled) return;
-          const json = await res.json() as { data?: Array<Record<string, unknown>> };
-          const list = (json.data ?? []).map((u) => ({
+          const json = await usersApi.list();
+          if (cancelled) return;
+          const list = (json.data as Array<Record<string, unknown>> ?? []).map((u) => ({
             id: u['id'] as string,
             label: (u['full_name'] as string) ?? (u['email'] as string) ?? '',
           }));

@@ -22,14 +22,10 @@ export class ActivitiesController {
   };
 
   list = async (request: FastifyRequest, reply: FastifyReply) => {
-    const isInternal = request.headers['x-internal-request'] === '1';
-    const userId = request.headers['x-user-id'] as string | undefined;
     const userRole = request.headers['x-user-role'] as string | undefined;
 
-    if (!isInternal && !userId) throw new UnauthorizedError('Not authenticated');
-
     const adminRoles = new Set(['org_admin', 'tenant_admin', 'super_admin']);
-    if (!isInternal && userRole && !adminRoles.has(userRole)) throw new ForbiddenError();
+    if (userRole && !adminRoles.has(userRole)) throw new ForbiddenError();
 
     const activities = await repo.listActivities();
     return reply.send({ success: true, data: activities });

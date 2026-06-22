@@ -8,7 +8,13 @@ import {
   JWT_MAX_AGE_SECONDS,
 } from '@crm/auth-constants';
 import type { JwtPayload, JwtVerifyResult } from '@crm/types';
+import {
+  revokeToken as dbRevokeToken,
+  isTokenRevoked as dbIsTokenRevoked,
+} from '@crm/db';
 import { config } from './config.js';
+
+export { JWT_MAX_AGE_SECONDS };
 
 export function signJwt(claims: Omit<JwtPayload, 'iat' | 'exp' | 'jti'>): string {
   return jwt.sign(
@@ -39,8 +45,6 @@ export function verifyJwt(token: string): JwtVerifyResult {
   }
 }
 
-// Decode without verification — used only to extract jti from a token whose
-// signature has already been verified by the caller.
 export function decodeJwtUnchecked(token: string): JwtPayload | null {
   try {
     return jwt.decode(token) as JwtPayload | null;
@@ -49,29 +53,30 @@ export function decodeJwtUnchecked(token: string): JwtPayload | null {
   }
 }
 
-// In-memory revocation list.
-// NOTE: Does not survive process restarts and is not shared across instances.
-// For multi-instance deployments, replace with a Redis SET keyed by jti with TTL.
-const _revoked = new Map<string, number>(); // jti → expiry epoch ms
-
-export function revokeJti(jti: string, exp: number): void {
-  _revoked.set(jti, exp * 1000);
+export async function revokeJti(
+  jti: string,
+  exp: number,
+  context?: { user_id?: string; org_id?: string; tenant_id?: string },
+): Promise<void> {
+  await dbRevokeToken({
+    jti,
+    expires_at: new Date(exp * 1000),
+    reason: 'logout',
+    ...(context?.user_id ? { user_id: context.user_id } : {}),
+    ...(context?.org_id ? { org_id: context.org_id } : {}),
+    ...(context?.tenant_id ? { tenant_id: context.tenant_id } : {}),
+  });
 }
 
-export function isJtiRevoked(jti: string): boolean {
-  const exp = _revoked.get(jti);
-  if (exp === undefined) return false;
-  if (Date.now() > exp) {
-    _revoked.delete(jti);
-    return false;
-  }
-  return true;
+export async function isJtiRevoked(
+  jti: string,
+  context?: { user_id?: string; org_id?: string; tenant_id?: string; issued_at?: number },
+): Promise<boolean> {
+  return dbIsTokenRevoked({
+    jti,
+    ...(context?.user_id ? { user_id: context.user_id } : {}),
+    ...(context?.org_id ? { org_id: context.org_id } : {}),
+    ...(context?.tenant_id ? { tenant_id: context.tenant_id } : {}),
+    ...(context?.issued_at !== undefined ? { issued_at: context.issued_at } : {}),
+  });
 }
-
-// Prune expired entries every 15 minutes to prevent unbounded memory growth
-setInterval(() => {
-  const now = Date.now();
-  for (const [jti, exp] of _revoked) {
-    if (now > exp) _revoked.delete(jti);
-  }
-}, 15 * 60 * 1000).unref();

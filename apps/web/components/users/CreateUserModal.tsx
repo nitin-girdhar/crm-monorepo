@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import type { SessionUser, UserRole } from '@crm/types';
 import { ROLES, ROLE_RANK } from '@crm/auth-constants';
 import { canCreateUser } from '@/src/lib/permissions';
+import { users as usersApi } from '@/src/lib/api/client';
 import Modal from './Modal';
 import RoleSelector from './RoleSelector';
 import TemporaryPasswordPanel from './TemporaryPasswordPanel';
@@ -100,27 +101,16 @@ export default function CreateUserModal({ open, onClose, actorRank, users, actor
       if (mobile) body.mobile = mobile;
       if (managerId) body.managerId = managerId;
 
-      const res = await fetch('/api/users', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = (await res.json().catch(() => null)) as
-        | { success: boolean; data?: { id: string; email: string }; temporary_password?: string; error?: string; details?: Array<{ path: string[]; message: string }> }
-        | null;
-      if (!res.ok) {
-        const detail = data?.details?.map((d) => `${d.path.join('.')}: ${d.message}`).join('; ');
-        setError(detail || data?.error || 'Failed to create user.');
-        return;
-      }
-      if (!data?.temporary_password || !data.data?.email) {
+      const data = await usersApi.create(body);
+      if (!data.temporary_password || !data.data?.email) {
         setError('Unexpected response from server.');
         return;
       }
       setSuccess({ email: data.data.email, temporaryPassword: data.temporary_password });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Network error.');
+    } catch (err: unknown) {
+      const body = (err as { body?: { details?: Array<{ path: string[]; message: string }> } }).body;
+      const detail = body?.details?.map((d) => `${d.path.join('.')}: ${d.message}`).join('; ');
+      setError(detail || (err instanceof Error ? err.message : 'Network error.'));
     } finally {
       setPending(false);
     }

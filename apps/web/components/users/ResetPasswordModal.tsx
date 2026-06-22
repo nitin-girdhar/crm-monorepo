@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { users as usersApi } from '@/src/lib/api/client';
 import Modal from './Modal';
 
 interface Props {
@@ -54,17 +55,7 @@ export default function ResetPasswordModal({ open, onClose, userId, email }: Pro
     if (!canSubmit) return;
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/users/${userId}/reset-password`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, confirm }),
-      });
-      const data = (await res.json().catch(() => null)) as { error?: string } | null;
-      if (!res.ok) {
-        setError(data?.error ?? 'Failed to set password.');
-        return;
-      }
+      await usersApi.resetPassword(userId, password);
       setPassword('');
       setConfirm('');
       setDone(true);

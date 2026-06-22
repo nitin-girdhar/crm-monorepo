@@ -233,7 +233,16 @@ export const campaigns = {
 // ── Branches ─────────────────────────────────────────────────────────────────
 
 export const branches = {
-  list: () => request<{ success: true; data: Array<{ id: string; name: string; org_id: string; org_name?: string }> }>('/branches'),
+  list: (params: { cityIds?: string; stateIds?: string; countryIds?: string } = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(
+        Object.entries(params)
+          .filter(([, v]) => v !== undefined && v !== '')
+          .map(([k, v]) => [k, String(v)]),
+      ),
+    ).toString();
+    return request<{ success: true; data: Array<{ id: string; name: string; org_id: string; org_name?: string; city_id?: number | null; state_id?: number | null; country_id?: number | null; cityId?: number | null; stateId?: number | null; countryId?: number | null }> }>(`/branches${qs ? `?${qs}` : ''}`);
+  },
 
   all: () => request<{ success: true; data: Array<{ id: string; name: string; org_id: string }> }>('/branches/all'),
 };
@@ -275,6 +284,17 @@ export const locations = {
       };
     }>(`/locations${qs ? `?${qs}` : ''}`);
   },
+
+  list: (params: { level?: string; countryIds?: string; stateIds?: string } = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(
+        Object.entries(params)
+          .filter(([, v]) => v !== undefined && v !== '')
+          .map(([k, v]) => [k, String(v)]),
+      ),
+    ).toString();
+    return request<{ success: true; data: unknown[] }>(`/locations${qs ? `?${qs}` : ''}`);
+  },
 };
 
 // ── Analytics ─────────────────────────────────────────────────────────────────
@@ -290,4 +310,19 @@ export const analytics = {
 
 export const activities = {
   list: () => request<{ success: true; data: unknown[] }>('/activities'),
+};
+
+// ── Follow-Ups ───────────────────────────────────────────────────────────────
+
+export const followUps = {
+  list: (params: { assignedRepId?: string; overdueOnly?: string } = {}) => {
+    const qs = new URLSearchParams(
+      Object.fromEntries(
+        Object.entries(params)
+          .filter(([, v]) => v !== undefined && v !== '')
+          .map(([k, v]) => [k, String(v)]),
+      ),
+    ).toString();
+    return request<{ success: true; data: unknown[]; pipeline?: unknown[] }>(`/follow-ups${qs ? `?${qs}` : ''}`);
+  },
 };

@@ -1,14 +1,16 @@
 import { uuid, text, timestamp, jsonb } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { auditSchema } from '../pg-schemas';
+import { usersTable } from './users.table';
+import { organizationsTable } from './organizations.table';
 
 export const activitiesTable = auditSchema.table('activities', {
   id:          uuid('id').primaryKey().default(sql`gen_uuidv7()`),
   actionType:  text('action_type').notNull(),
-  performedBy: uuid('performed_by'),
+  performedBy: uuid('performed_by').references(() => usersTable.id),
   targetId:    uuid('target_id'),
   targetType:  text('target_type'),
-  orgId:       uuid('org_id'),
+  orgId:       uuid('org_id').references(() => organizationsTable.id),
   meta:        jsonb('meta'),
   createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });

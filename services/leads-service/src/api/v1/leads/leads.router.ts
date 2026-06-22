@@ -30,6 +30,6 @@ export async function leadsRouter(app: FastifyInstance) {
   app.patch('/leads/:id/follow-ups/:follow_up_id', { preHandler: [authenticate, validate({ body: updateFollowUpBodySchema })] }, fuCtrl.update);
   app.delete('/leads/:id/follow-ups/:follow_up_id', { preHandler: [authenticate] }, fuCtrl.delete);
 
-  app.get('/lookups/lead-stages', ctrl.getStageOptions);
-  app.get('/lookups/lead-stage-outcomes', ctrl.getStageOutcomes);
+  app.get('/lookups/lead-stages', { preHandler: [authenticate] }, ctrl.getStageOptions);
+  app.get('/lookups/lead-stage-outcomes', { preHandler: [authenticate] }, ctrl.getStageOutcomes);
 }

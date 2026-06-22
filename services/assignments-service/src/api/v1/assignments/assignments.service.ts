@@ -9,15 +9,15 @@ import * as repo from './assignments.repository.js';
 export async function listAllAssignments(ctx: RoleTxContext, page: number, pageSize: number) {
   const MULTI_ORG_ROLES = new Set(['super_admin', 'tenant_admin']);
   const orgIds = MULTI_ORG_ROLES.has(ctx.role) ? null : [ctx.org_id];
-  return repo.listAllAssignments(orgIds, page, pageSize);
+  return repo.listAllAssignments(ctx, orgIds, page, pageSize);
 }
 
 export async function listMyAssignments(ctx: RoleTxContext, page: number, pageSize: number) {
-  return repo.listMyAssignments(ctx.user_id, ctx.org_id, page, pageSize);
+  return repo.listMyAssignments(ctx, page, pageSize);
 }
 
-export async function getAssignmentById(id: string) {
-  const assignment = await repo.getAssignmentById(id);
+export async function getAssignmentById(ctx: RoleTxContext, id: string) {
+  const assignment = await repo.getAssignmentById(ctx, id);
   if (!assignment) throw new NotFoundError('Assignment not found');
   return assignment;
 }
@@ -49,7 +49,7 @@ export async function createAssignment(ctx: RoleTxContext, actorRank: number, da
   }
 
   try {
-    const result = await repo.assignLead({ lead_id: data.lead_id, assigned_to: data.assigned_to });
+    const result = await repo.assignLead(ctx, { lead_id: data.lead_id, assigned_to: data.assigned_to });
 
     await logActivity({
       action_type: 'assignment_created',
@@ -80,7 +80,7 @@ export async function reassignLead(ctx: RoleTxContext, actorRank: number, leadId
     throw new ForbiddenError('Insufficient permissions to assign to this user');
   }
 
-  const { result, previous_assignee } = await repo.reassignLead({
+  const { result, previous_assignee } = await repo.reassignLead(ctx, {
     lead_id: leadId,
     assigned_to: data.assigned_to,
   });
@@ -98,7 +98,7 @@ export async function reassignLead(ctx: RoleTxContext, actorRank: number, leadId
 
 export async function unassignLead(ctx: RoleTxContext, actorRank: number, leadId: string) {
   if (actorRank < RANKS.ADMIN) throw new ForbiddenError('Only admins can remove assignments');
-  const result = await repo.unassignLead(leadId);
+  const result = await repo.unassignLead(ctx, leadId);
   if (!result) throw new NotFoundError('Assignment not found');
   await logActivity({ action_type: 'assignment_removed', performed_by: ctx.user_id, lead_id: leadId });
 }
@@ -143,7 +143,7 @@ export async function listLeadsHistory(
       if (params.assignedTo) {
         filters.userIds = [params.assignedTo];
       } else {
-        const teamIds = await repo.getTeamMemberIds(ctx.user_id, ctx.org_id);
+        const teamIds = await repo.getTeamMemberIds(ctx, ctx.user_id, ctx.org_id);
         filters.userIds = teamIds;
       }
       filters.orgIds = params.orgIds?.length ? params.orgIds : [ctx.org_id];
@@ -164,7 +164,7 @@ export async function listLeadsHistory(
   }
 
   const [result, options] = await Promise.all([
-    repo.listAssignmentsFiltered(filters),
+    repo.listAssignmentsFiltered(ctx, filters),
     repo.getStageAndOutcomeOptions(),
   ]);
 

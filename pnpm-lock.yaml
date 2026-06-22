@@ -237,6 +237,9 @@ importers:
       '@crm/auth-constants':
         specifier: workspace:*
         version: link:../../packages/auth-constants
+      '@crm/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@crm/permissions':
         specifier: workspace:*
         version: link:../../packages/permissions

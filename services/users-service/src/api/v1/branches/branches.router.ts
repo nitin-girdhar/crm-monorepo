@@ -9,5 +9,5 @@ export async function branchesRouter(app: FastifyInstance) {
 
   app.get('/branches',      { preHandler: [authenticate, validate({ query: getBranchesQuerySchema })] }, ctrl.getBranches);
   app.get('/branches/all',  { preHandler: [authenticate] }, ctrl.getAllBranches);
-  app.get('/lead-sources',  {}, ctrl.getLeadSources);
+  app.get('/lead-sources',  { preHandler: [authenticate] }, ctrl.getLeadSources);
 }

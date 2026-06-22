@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { branches as branchesApi } from '@/src/lib/api/client';
 
 export function useAllBranches() {
   const [branches, setBranches] = useState<string[]>([]);
@@ -11,13 +12,11 @@ export function useAllBranches() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/branches/all', { cache: 'no-store' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = await res.json() as { data?: unknown };
+        const json = await branchesApi.all();
         if (cancelled) return;
         const list = Array.isArray(json.data) ? json.data : [];
         setBranches(
-          (Array.isArray(list) ? list : []).map((b) =>
+          list.map((b) =>
             typeof b === 'string' ? b : (b as Record<string, unknown>).name as string ?? '',
           ).filter(Boolean),
         );

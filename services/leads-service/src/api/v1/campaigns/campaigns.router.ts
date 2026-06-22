@@ -13,6 +13,6 @@ export async function campaignsRouter(app: FastifyInstance) {
   app.patch('/campaigns/:id', { preHandler: [authenticate, validate({ body: updateCampaignBodySchema })] }, ctrl.update);
   app.delete('/campaigns/:id', { preHandler: [authenticate] }, ctrl.delete);
 
-  app.get('/campaigns/platforms', ctrl.listPlatforms);
-  app.get('/campaigns/statuses', ctrl.listStatuses);
+  app.get('/campaigns/platforms', { preHandler: [authenticate] }, ctrl.listPlatforms);
+  app.get('/campaigns/statuses', { preHandler: [authenticate] }, ctrl.listStatuses);
 }

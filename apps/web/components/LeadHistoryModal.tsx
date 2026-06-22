@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { LeadView } from "@crm/types";
+import { leads as leadsApi } from "@/src/lib/api/client";
 import { STATUS_CONFIG } from "./leads/constants";
 
 interface TimelineEvent {
@@ -493,19 +494,7 @@ function FollowUpActionModal({
         body.scheduledAt = new Date(scheduledAt).toISOString();
       if (notes.trim()) body.notes = notes.trim();
 
-      const res = await fetch(
-        `/api/leads/${followUp.leadId}/follow-ups/${followUp.followupId}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-          credentials: "include",
-        },
-      );
-      if (!res.ok) {
-        const err = (await res.json()) as { error?: string };
-        throw new Error(err.error ?? "Failed to update follow-up");
-      }
+      await leadsApi.updateFollowUp(followUp.leadId, followUp.followupId!, body);
       onUpdated();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -696,19 +685,11 @@ export function LeadHistoryModal({ lead: leadProp, statusLabelMap = {}, onClose 
     setLoading(true);
     setError(null);
     Promise.all([
-      fetch(`/api/leads/${leadId}`, { credentials: "include" }).then(async (r) => {
-        if (!r.ok) throw new Error("Failed to load lead");
-        const body = await r.json() as { data?: LeadView };
-        return body.data ?? null;
-      }),
-      fetch(`/api/leads/${leadId}/timeline`, { credentials: "include" }).then(async (r) => {
-        const body = await r.json() as { data?: TimelineEvent[]; timeline?: TimelineEvent[]; events?: TimelineEvent[] };
-        if (!r.ok) throw new Error("Failed to load timeline");
-        return body.data ?? body.timeline ?? body.events ?? [];
-      }),
+      leadsApi.get(leadId).then((res: { data: unknown }) => res.data ?? null),
+      leadsApi.getTimeline(leadId).then((res: { data: unknown[] }) => (res.data ?? []) as TimelineEvent[]),
     ])
       .then(([leadData, timelineData]) => {
-        setLead(leadData);
+        setLead(leadData as LeadView | null);
         setEvents(timelineData);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load data"))

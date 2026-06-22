@@ -55,6 +55,12 @@ export async function handleAutoTrigger(
   request: FastifyRequest,
   reply: FastifyReply,
 ): Promise<void> {
+  const secret = request.headers['x-internal-secret'] as string | undefined;
+  const INTERNAL_SECRET = process.env['INTERNAL_SERVICE_SECRET'];
+  if (!INTERNAL_SECRET || secret !== INTERNAL_SECRET) {
+    return reply.status(401).send({ error: 'Unauthorized' });
+  }
+
   const body = AutoTriggerSchema.parse(request.body);
 
   const result = await triggerCapiEvent({

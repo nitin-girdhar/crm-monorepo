@@ -7,7 +7,7 @@ import ChangePasswordForm from '@/components/auth/ChangePasswordForm';
 
 export const dynamic = 'force-dynamic';
 
-const API_GATEWAY = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:4000';
+const API_GATEWAY = process.env['API_GATEWAY_INTERNAL_URL'] ?? 'http://localhost:4000';
 
 async function getSession(): Promise<SessionUser | null> {
   const cookieStore = await cookies();

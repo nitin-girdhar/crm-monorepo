@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { branches as branchesApi } from '@/src/lib/api/client';
 
 export interface DynamicBranch {
   id: string;
@@ -33,16 +34,13 @@ export function useBranches(locationFilter?: LocationFilter): UseBranchesReturn 
   const fetchBranches = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams();
       const f = filterRef.current;
-      if (f?.cityIds?.length)    params.set('cityIds',    f.cityIds.join(','));
-      if (f?.stateIds?.length)   params.set('stateIds',   f.stateIds.join(','));
-      if (f?.countryIds?.length) params.set('countryIds', f.countryIds.join(','));
+      const params: { cityIds?: string; stateIds?: string; countryIds?: string } = {};
+      if (f?.cityIds?.length)    params.cityIds    = f.cityIds.join(',');
+      if (f?.stateIds?.length)   params.stateIds   = f.stateIds.join(',');
+      if (f?.countryIds?.length) params.countryIds  = f.countryIds.join(',');
 
-      const res = await fetch(`/api/branches?${params}`, { cache: 'no-store' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      const json = await res.json() as { data?: Array<{ id: string; name: string; city_id?: number | null; state_id?: number | null; country_id?: number | null; cityId?: number | null; stateId?: number | null; countryId?: number | null }> };
+      const json = await branchesApi.list(params);
       const raw = json.data ?? [];
 
       setBranches(
