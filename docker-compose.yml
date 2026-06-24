@@ -118,6 +118,32 @@ services:
       postgres:
         condition: service_healthy
 
+  notifications-service:
+    build:
+      context: .
+      dockerfile: services/notifications-service/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: ${NOTIFICATIONS_SERVICE_PORT}
+      <<: *db-env
+    ports:
+      - '${NOTIFICATIONS_SERVICE_PORT}:${NOTIFICATIONS_SERVICE_PORT}'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  communication-service:
+    build:
+      context: .
+      dockerfile: services/communication-service/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: ${COMMUNICATION_SERVICE_PORT}
+    ports:
+      - '${COMMUNICATION_SERVICE_PORT}:${COMMUNICATION_SERVICE_PORT}'
+
   meta-conversion-api:
     build:
       context: .
@@ -148,6 +174,8 @@ services:
       ANALYTICS_SERVICE_URL: http://analytics-service:${ANALYTICS_SERVICE_PORT}
       ACTIVITIES_SERVICE_URL: http://activities-service:${ACTIVITIES_SERVICE_PORT}
       META_SERVICE_URL: http://meta-conversion-api:${META_SERVICE_PORT}
+      NOTIFICATIONS_SERVICE_URL: http://notifications-service:${NOTIFICATIONS_SERVICE_PORT}
+      COMMUNICATION_SERVICE_URL: http://communication-service:${COMMUNICATION_SERVICE_PORT}
     ports:
       - '${GATEWAY_PORT}:${GATEWAY_PORT}'
     depends_on:
@@ -158,6 +186,8 @@ services:
       - analytics-service
       - activities-service
       - meta-conversion-api
+      - notifications-service
+      - communication-service
 
   web:
     build:

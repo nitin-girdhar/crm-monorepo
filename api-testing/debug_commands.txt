@@ -13,6 +13,9 @@ taskkill /PID 22508 /F
 
 (netstat -ano | findstr ":4000.*LISTENING") -match '\d+$'; taskkill /PID $Matches[0] /F
 
+#start only two sercies
+npx turbo dev --filter=@crm/meta-conversion-api --filter=@crm/api-gateway
+
 
 # Check if gateway is responding
 curl http://localhost:4000/health
@@ -25,6 +28,8 @@ curl http://localhost:4004/health   # assignments
 curl http://localhost:4005/health   # analytics
 curl http://localhost:4006/health   # activities
 curl http://localhost:4007/health   # meta-conversion-api
+curl http://localhost:4008/health   # notifications
+curl http://localhost:4009/health   # communication-service
 
 # Restart a single service
 docker compose restart auth-service

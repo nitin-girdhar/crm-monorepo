@@ -5,9 +5,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
 import type { ColDef, ICellRendererParams } from 'ag-grid-community';
-import type { SessionUser } from '@crm/types';
-import { followUps as followUpsApi } from '@/src/lib/api/client';
+import type { LeadView, SessionUser } from '@crm/types';
+import { followUps as followUpsApi, leads as leadsApi } from '@/src/lib/api/client';
 import { LeadHistoryModal } from '@/components/LeadHistoryModal';
+import { LeadEditModal } from '@/components/leads/LeadEditModal';
+import { useLeadEditData } from '@/hooks/useLeadEditData';
 import DownloadButton from '@/components/common/DownloadButton';
 import { buildFilename, exportRows, type ExportColumn, type ExportFormat } from '@/src/lib/export/export';
 
@@ -71,6 +73,9 @@ export default function FollowUpsShell({ actor }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [historyItem, setHistoryItem] = useState<FollowUpItem | null>(null);
+  const [editingLead, setEditingLead] = useState<LeadView | null>(null);
+
+  const editData = useLeadEditData(actor);
 
   const isSalesRep = actor.role === 'sales_representative';
 
@@ -88,6 +93,15 @@ export default function FollowUpsShell({ actor }: Props) {
   }, [isSalesRep, actor.id]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  const handleEdit = useCallback(async (item: FollowUpItem) => {
+    try {
+      const res = await leadsApi.get(item.leadId);
+      setEditingLead(res.data);
+    } catch {
+      // Lead fetch failed — silently ignore
+    }
+  }, []);
 
   const upcoming = useMemo(
     () => all.filter((f) => !f.isOverdue).sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()),
@@ -118,7 +132,7 @@ export default function FollowUpsShell({ actor }: Props) {
               <DownloadButton onExport={(fmt) => exportRows(upcoming, EXPORT_COLS, buildFilename(['upcoming-followups']), fmt)} rowCount={upcoming.length} />
             </div>
             {upcoming.length > 0 ? (
-              <FollowUpGrid items={upcoming} onHistory={setHistoryItem} type="upcoming" />
+              <FollowUpGrid items={upcoming} onEdit={handleEdit} onHistory={setHistoryItem} type="upcoming" />
             ) : (
               <p className="py-8 text-center text-sm text-[#94A3B8]">No upcoming follow-ups.</p>
             )}
@@ -130,7 +144,7 @@ export default function FollowUpsShell({ actor }: Props) {
               <DownloadButton onExport={(fmt) => exportRows(missed, EXPORT_COLS, buildFilename(['missed-followups']), fmt)} rowCount={missed.length} />
             </div>
             {missed.length > 0 ? (
-              <FollowUpGrid items={missed} onHistory={setHistoryItem} type="missed" />
+              <FollowUpGrid items={missed} onEdit={handleEdit} onHistory={setHistoryItem} type="missed" />
             ) : (
               <p className="py-8 text-center text-sm text-[#94A3B8]">No missed follow-ups.</p>
             )}
@@ -141,11 +155,28 @@ export default function FollowUpsShell({ actor }: Props) {
       {historyItem && (
         <LeadHistoryModal lead={{ lead_id: historyItem.leadId }} onClose={() => setHistoryItem(null)} />
       )}
+
+      {editingLead && (
+        <LeadEditModal
+          lead={editingLead}
+          statusOptions={editData.statusOptions}
+          statusLabelMap={editData.statusLabelMap}
+          followUpSet={editData.followUpSet}
+          rejectionSet={editData.rejectionSet}
+          stageOutcomes={editData.stageOutcomes}
+          stageIdToName={editData.stageIdToName}
+          candidates={editData.candidates}
+          actor={actor}
+          onUpdate={async (payload) => { await editData.updateLead(payload); fetchData(); }}
+          onAssignmentChanged={fetchData}
+          onClose={() => setEditingLead(null)}
+        />
+      )}
     </div>
   );
 }
 
-function FollowUpGrid({ items, onHistory, type }: { items: FollowUpItem[]; onHistory: (f: FollowUpItem) => void; type: 'upcoming' | 'missed' }) {
+function FollowUpGrid({ items, onEdit, onHistory, type }: { items: FollowUpItem[]; onEdit: (f: FollowUpItem) => void; onHistory: (f: FollowUpItem) => void; type: 'upcoming' | 'missed' }) {
   const gridRef = useRef<AgGridReact>(null);
   const isMissed = type === 'missed';
 
@@ -198,20 +229,29 @@ function FollowUpGrid({ items, onHistory, type }: { items: FollowUpItem[]; onHis
       valueFormatter: (p) => p.value ?? '—',
     },
     {
-      headerName: '', width: 60, minWidth: 60, maxWidth: 60, sortable: false, filter: false, resizable: false, pinned: 'right',
+      headerName: '', width: 100, minWidth: 100, maxWidth: 100, sortable: false, filter: false, resizable: false, pinned: 'right',
       cellRenderer: (p: ICellRendererParams<FollowUpItem>) => {
         if (!p.data) return null;
         return (
-          <button type="button" title="View History" onClick={() => onHistory(p.data!)}
-            className="inline-flex items-center justify-center rounded-lg border border-[#E2E8F0] bg-white p-1.5 text-[#475569] transition-colors hover:border-[#7C3AED] hover:text-[#7C3AED]">
-            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button type="button" title="Edit" onClick={() => onEdit(p.data!)}
+              className="inline-flex items-center justify-center rounded-lg border border-[#E2E8F0] bg-white p-1.5 text-[#475569] transition-colors hover:border-[#0b6cbf] hover:text-[#0b6cbf]">
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+            </button>
+            <button type="button" title="View History" onClick={() => onHistory(p.data!)}
+              className="inline-flex items-center justify-center rounded-lg border border-[#E2E8F0] bg-white p-1.5 text-[#475569] transition-colors hover:border-[#7C3AED] hover:text-[#7C3AED]">
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </button>
+          </div>
         );
       },
+      cellStyle: { display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'visible' },
     },
-  ], [isMissed, onHistory]);
+  ], [isMissed, onEdit, onHistory]);
 
   const defaultColDef: ColDef = useMemo(() => ({
     resizable: true,

@@ -29,6 +29,8 @@ export default function UserMenu({ user }: Props) {
     setPending(true);
     try {
       await auth.logout();
+    } catch {
+      // Server-side session cleanup may fail; still redirect to login
     } finally {
       router.replace('/login');
       router.refresh();

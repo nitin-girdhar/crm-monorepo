@@ -1,5 +1,6 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
+import { AxiosError } from 'axios';
 import { getIntegrationById } from '../../../services/integration.service.js';
 import { fetchLeadFromMeta } from '../../../services/meta-api.service.js';
 import { syncLeadToDatabase } from '../../../services/lead-sync.service.js';
@@ -148,7 +149,12 @@ export async function handleWebhookPost(
         results.push({ leadId, status: syncResult.isDuplicate ? 'duplicate' : 'synced' });
       } catch (leadError) {
         const msg = leadError instanceof Error ? leadError.message : String(leadError);
-        request.log.error(`Failed to sync leadId=${leadId} — ${msg}`);
+        const metaErrorDetail = leadError instanceof AxiosError
+          ? JSON.stringify(leadError.response?.data)
+          : undefined;
+        request.log.error(
+          `Failed to sync leadId=${leadId} — ${msg}${metaErrorDetail ? ` | meta_response=${metaErrorDetail}` : ''}`,
+        );
         results.push({ leadId, status: 'error' });
       }
     }

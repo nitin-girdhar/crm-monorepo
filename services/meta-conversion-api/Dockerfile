@@ -1,0 +1,43 @@
+FROM node:20-alpine AS base
+RUN npm install -g pnpm@9.15.0
+WORKDIR /app
+
+FROM base AS deps
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY packages/types/package.json packages/types/
+COPY packages/auth-constants/package.json packages/auth-constants/
+COPY packages/permissions/package.json packages/permissions/
+COPY packages/db/package.json packages/db/
+COPY packages/validation/package.json packages/validation/
+COPY services/meta-conversion-api/package.json services/meta-conversion-api/
+RUN pnpm install --frozen-lockfile
+
+FROM deps AS builder
+COPY tsconfig.base.json ./
+COPY packages/ packages/
+COPY services/meta-conversion-api/ services/meta-conversion-api/
+RUN pnpm --filter @crm/auth-constants build
+RUN pnpm --filter @crm/types build
+RUN pnpm --filter @crm/permissions build
+RUN pnpm --filter @crm/db build
+RUN pnpm --filter @crm/validation build
+RUN pnpm --filter @crm/meta-conversion-api build
+
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=builder /app/packages/types/dist ./packages/types/dist
+COPY --from=builder /app/packages/auth-constants/dist ./packages/auth-constants/dist
+COPY --from=builder /app/packages/permissions/dist ./packages/permissions/dist
+COPY --from=builder /app/packages/db/dist ./packages/db/dist
+COPY --from=builder /app/packages/validation/dist ./packages/validation/dist
+COPY --from=builder /app/services/meta-conversion-api/dist ./services/meta-conversion-api/dist
+COPY packages/types/package.json ./packages/types/
+COPY packages/auth-constants/package.json ./packages/auth-constants/
+COPY packages/permissions/package.json ./packages/permissions/
+COPY packages/db/package.json ./packages/db/
+COPY packages/validation/package.json ./packages/validation/
+COPY services/meta-conversion-api/package.json ./services/meta-conversion-api/
+EXPOSE 4007
+CMD ["node", "services/meta-conversion-api/dist/server.js"]

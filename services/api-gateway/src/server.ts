@@ -302,6 +302,23 @@ app.patch('/meta/integration', { ...withAuth }, async (req, reply) => {
   return proxyTo(config.metaServiceUrl, '/api/v1/integration', req, reply, req.userCtx);
 });
 
+// Communications
+app.get('/communications/status', { ...withAuth }, async (req, reply) => {
+  return proxyTo(config.communicationServiceUrl, '/api/v1/communications/status', req, reply, req.userCtx);
+});
+app.post('/communications/email', { ...withAuth }, async (req, reply) => {
+  return proxyTo(config.communicationServiceUrl, '/api/v1/communications/email', req, reply, req.userCtx);
+});
+app.post('/communications/whatsapp/text', { ...withAuth }, async (req, reply) => {
+  return proxyTo(config.communicationServiceUrl, '/api/v1/communications/whatsapp/text', req, reply, req.userCtx);
+});
+app.post('/communications/whatsapp/template', { ...withAuth }, async (req, reply) => {
+  return proxyTo(config.communicationServiceUrl, '/api/v1/communications/whatsapp/template', req, reply, req.userCtx);
+});
+app.post('/communications/send', { ...withAuth }, async (req, reply) => {
+  return proxyTo(config.communicationServiceUrl, '/api/v1/communications/send', req, reply, req.userCtx);
+});
+
 // Legacy URL aliases (monolith used /api/dashboard and /api/org/performance)
 app.get('/dashboard', { ...withAuth }, async (req, reply) => {
   return proxyTo(config.analyticsServiceUrl, '/api/v1/analytics/dashboard', req, reply, req.userCtx);
