@@ -193,11 +193,14 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://api-gateway:${GATEWAY_PORT}
     restart: unless-stopped
     env_file: .env
     environment:
       PORT: '3000'
       NEXT_PUBLIC_API_URL: http://api-gateway:${GATEWAY_PORT}
+      API_GATEWAY_INTERNAL_URL: http://api-gateway:${GATEWAY_PORT}
     ports:
       - '3000:3000'
     depends_on:

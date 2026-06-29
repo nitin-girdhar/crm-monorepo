@@ -1,3 +1,4 @@
+--rollback
 --drop database crm_v2 (force)
 --create database crm_v2
 -- ===================================================================
@@ -497,10 +498,12 @@ CREATE TRIGGER trg_tenants_soft_delete
 ALTER TABLE entity.tenants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE entity.tenants FORCE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS tenant_self_policy ON entity.tenants;
 CREATE POLICY tenant_self_policy ON entity.tenants
   AS PERMISSIVE FOR SELECT TO app_user
   USING (id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
 
+DROP POLICY IF EXISTS tenant_admin_self_policy ON entity.tenants;
 CREATE POLICY tenant_admin_self_policy ON entity.tenants
   AS PERMISSIVE FOR ALL TO tenant_admin
   USING (id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
@@ -591,6 +594,64 @@ CREATE TRIGGER trg_00_users_set_org_id
 DROP TRIGGER IF EXISTS trg_01_users_set_created_by ON iam.users;
 CREATE TRIGGER trg_01_users_set_created_by
   BEFORE INSERT ON iam.users FOR EACH ROW EXECUTE FUNCTION public.set_created_by();
+
+-- ── iam.user_org_mapping ─────────────────────────────────────────
+-- Source of truth for which orgs a user can access and at what role.
+-- Replaces the single org_id + role_id on iam.users for access control.
+--
+-- iam.users.org_id  remains as the user's PRIMARY / home org (FK integrity
+--               and fallback when no org is selected).
+-- iam.users.role_id remains as the user's DEFAULT role (mirrors the home
+--               org row here; kept for backward-compat during transition).
+CREATE TABLE IF NOT EXISTS iam.user_org_mapping (
+  user_id    UUID        NOT NULL REFERENCES iam.users(id)         ON DELETE CASCADE,
+  org_id     UUID        NOT NULL REFERENCES entity.organizations(id)  ON DELETE CASCADE,
+  role_id    UUID        NOT NULL REFERENCES iam.user_roles(id)     ON DELETE RESTRICT,
+  is_active  BOOLEAN     NOT NULL DEFAULT TRUE,
+  granted_by UUID        REFERENCES iam.users(id)                   ON DELETE SET NULL,
+  granted_at TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP(),
+  PRIMARY KEY (user_id, org_id)
+);
+
+DROP TRIGGER IF EXISTS trg_user_org_mapping_updated_at ON iam.user_org_mapping;
+CREATE TRIGGER trg_user_org_mapping_updated_at
+  BEFORE UPDATE ON iam.user_org_mapping
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+CREATE INDEX IF NOT EXISTS idx_user_org_mapping_user_active
+  ON iam.user_org_mapping (user_id) WHERE is_active;
+CREATE INDEX IF NOT EXISTS idx_user_org_mapping_org_active
+  ON iam.user_org_mapping (org_id)  WHERE is_active;
+CREATE INDEX IF NOT EXISTS idx_user_org_mapping_role
+  ON iam.user_org_mapping (role_id);
+
+-- ── RLS HELPER FUNCTIONS (SECURITY DEFINER) ───────────────────────
+-- These bypass RLS on iam.user_org_mapping so they can be used safely
+-- inside RLS policies on OTHER tables without recursive infinite loops.
+
+DROP FUNCTION IF EXISTS iam.fn_user_active_orgs(UUID) CASCADE;
+CREATE FUNCTION iam.fn_user_active_orgs(p_user_id UUID)
+RETURNS UUID[] LANGUAGE sql STABLE SECURITY DEFINER AS $$
+  SELECT ARRAY(SELECT org_id FROM iam.user_org_mapping WHERE user_id = p_user_id AND is_active)
+$$;
+
+DROP FUNCTION IF EXISTS iam.fn_org_active_users(UUID) CASCADE;
+CREATE FUNCTION iam.fn_org_active_users(p_org_id UUID)
+RETURNS UUID[] LANGUAGE sql STABLE SECURITY DEFINER AS $$
+  SELECT ARRAY(SELECT user_id FROM iam.user_org_mapping WHERE org_id = p_org_id AND is_active)
+$$;
+
+CREATE OR REPLACE FUNCTION iam.fn_user_org_rank(p_user_id UUID, p_org_id UUID)
+RETURNS INT LANGUAGE plpgsql STABLE SECURITY DEFINER AS $$
+DECLARE v_rank INT;
+BEGIN
+  SELECT ur.rank INTO v_rank
+  FROM iam.user_org_mapping uom
+  JOIN iam.user_roles ur ON ur.id = uom.role_id
+  WHERE uom.user_id = p_user_id AND uom.org_id = p_org_id AND uom.is_active;
+  RETURN COALESCE(v_rank, -1);
+END; $$;
 
 -- ── BRANCHES (monorepo addition: physical branch within an org) ───
 CREATE TABLE IF NOT EXISTS entity.branches (
@@ -2176,7 +2237,7 @@ DO $$
 DECLARE s TEXT;
 BEGIN
   FOREACH s IN ARRAY ARRAY['public','geo','entity','iam','crm','marketing','audit','ext'] LOOP
-    EXECUTE format('GRANT USAGE ON SCHEMA %I TO lead_svc, campaign_svc, user_mgmt_svc, notif_svc, intake_svc, tenant_dash_svc, analytics_svc, meta_svc', s);
+    EXECUTE format('GRANT USAGE ON SCHEMA %I TO lead_svc, campaign_svc, user_mgmt_svc, notif_svc, intake_svc, tenant_dash_svc, analytics_svc', s);
   END LOOP;
 END; $$;
 
@@ -2205,67 +2266,8 @@ END; $$;
 -- ALTER ROLE analytics_svc   WITH PASSWORD :'ANALYTICS_SVC_PWD';
 
 -- ===================================================================
--- v1.1: USER-ORG MAPPING + MULTI-ORG RLS FIX
+-- v1.1: MULTI-ORG RLS FIX (auto-grant triggers + updated FK checks)
 -- ===================================================================
-
--- ── USER_ORG_MAPPING ──────────────────────────────────────────────
--- Source of truth for which orgs a user can access and at what role.
--- Replaces the single org_id + role_id on iam.users for access control.
---
--- iam.users.org_id  remains as the user's PRIMARY / home org (FK integrity
---               and fallback when no org is selected).
--- iam.users.role_id remains as the user's DEFAULT role (mirrors the home
---               org row here; kept for backward-compat during transition).
-CREATE TABLE IF NOT EXISTS iam.user_org_mapping (
-  user_id    UUID        NOT NULL REFERENCES iam.users(id)         ON DELETE CASCADE,
-  org_id     UUID        NOT NULL REFERENCES entity.organizations(id)  ON DELETE CASCADE,
-  role_id    UUID        NOT NULL REFERENCES iam.user_roles(id)     ON DELETE RESTRICT,
-  is_active  BOOLEAN     NOT NULL DEFAULT TRUE,
-  granted_by UUID        REFERENCES iam.users(id)                   ON DELETE SET NULL,
-  granted_at TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP(),
-  PRIMARY KEY (user_id, org_id)
-);
-
-DROP TRIGGER IF EXISTS trg_user_org_mapping_updated_at ON iam.user_org_mapping;
-CREATE TRIGGER trg_user_org_mapping_updated_at
-  BEFORE UPDATE ON iam.user_org_mapping
-  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
-
-CREATE INDEX IF NOT EXISTS idx_user_org_mapping_user_active
-  ON iam.user_org_mapping (user_id) WHERE is_active;
-CREATE INDEX IF NOT EXISTS idx_user_org_mapping_org_active
-  ON iam.user_org_mapping (org_id)  WHERE is_active;
-CREATE INDEX IF NOT EXISTS idx_user_org_mapping_role
-  ON iam.user_org_mapping (role_id);
-
--- ── RLS HELPER FUNCTIONS (SECURITY DEFINER) ───────────────────────
--- These bypass RLS on iam.user_org_mapping so they can be used safely
--- inside RLS policies on OTHER tables without recursive infinite loops.
-
-DROP FUNCTION IF EXISTS iam.fn_user_active_orgs(UUID);
-CREATE FUNCTION iam.fn_user_active_orgs(p_user_id UUID)
-RETURNS UUID[] LANGUAGE sql STABLE SECURITY DEFINER AS $$
-  SELECT ARRAY(SELECT org_id FROM iam.user_org_mapping WHERE user_id = p_user_id AND is_active)
-$$;
-
-DROP FUNCTION IF EXISTS iam.fn_org_active_users(UUID);
-CREATE FUNCTION iam.fn_org_active_users(p_org_id UUID)
-RETURNS UUID[] LANGUAGE sql STABLE SECURITY DEFINER AS $$
-  SELECT ARRAY(SELECT user_id FROM iam.user_org_mapping WHERE org_id = p_org_id AND is_active)
-$$;
-
--- Returns role rank of a user in an org (-1 if no active mapping).
-CREATE OR REPLACE FUNCTION iam.fn_user_org_rank(p_user_id UUID, p_org_id UUID)
-RETURNS INT LANGUAGE plpgsql STABLE SECURITY DEFINER AS $$
-DECLARE v_rank INT;
-BEGIN
-  SELECT ur.rank INTO v_rank
-  FROM iam.user_org_mapping uom
-  JOIN iam.user_roles ur ON ur.id = uom.role_id
-  WHERE uom.user_id = p_user_id AND uom.org_id = p_org_id AND uom.is_active;
-  RETURN COALESCE(v_rank, -1);
-END; $$;
 
 -- ── AUTO-GRANT TRIGGER 1 ──────────────────────────────────────────
 -- New org added to a tenant → all existing tenant_admins in that
@@ -2477,6 +2479,10 @@ ALTER TABLE iam.users FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS org_isolation_policy    ON iam.users;
 DROP POLICY IF EXISTS tenant_isolation_policy ON iam.users;
+DROP POLICY IF EXISTS users_org_select        ON iam.users;
+DROP POLICY IF EXISTS users_org_write         ON iam.users;
+DROP POLICY IF EXISTS users_org_update        ON iam.users;
+DROP POLICY IF EXISTS users_tenant_isolation  ON iam.users;
 
 CREATE POLICY users_org_select ON iam.users AS PERMISSIVE FOR SELECT TO app_user
   USING (
@@ -2668,6 +2674,9 @@ ALTER VIEW crm.vw_lead_assignment_timeline SET (security_invoker = true);
 -- which stacks additively (OR) with self_read_policy for SELECT.
 -- Split into explicit per-operation policies to prevent ambiguity.
 DROP POLICY IF EXISTS org_admin_manage_policy ON iam.user_org_mapping;
+DROP POLICY IF EXISTS org_admin_read_policy   ON iam.user_org_mapping;
+DROP POLICY IF EXISTS org_admin_insert_policy ON iam.user_org_mapping;
+DROP POLICY IF EXISTS org_admin_update_policy ON iam.user_org_mapping;
 
 CREATE POLICY org_admin_read_policy ON iam.user_org_mapping AS PERMISSIVE FOR SELECT TO app_user
   USING (
@@ -2790,6 +2799,9 @@ CREATE TABLE IF NOT EXISTS ext.meta_org_config (
 ALTER TABLE ext.meta_org_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ext.meta_org_config FORCE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS org_isolation_policy    ON ext.meta_org_config;
+DROP POLICY IF EXISTS tenant_isolation_policy ON ext.meta_org_config;
+
 CREATE POLICY org_isolation_policy ON ext.meta_org_config
   FOR ALL TO app_user
   USING  (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid)
@@ -2838,6 +2850,9 @@ CREATE INDEX IF NOT EXISTS idx_meta_leads_created      ON ext.meta_leads (create
 ALTER TABLE ext.meta_leads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ext.meta_leads FORCE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS org_isolation_policy    ON ext.meta_leads;
+DROP POLICY IF EXISTS tenant_isolation_policy ON ext.meta_leads;
+
 CREATE POLICY org_isolation_policy ON ext.meta_leads
   FOR ALL TO app_user
   USING  (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid)
@@ -2866,6 +2881,9 @@ CREATE TABLE IF NOT EXISTS ext.meta_lead_custom_fields (
 
 ALTER TABLE ext.meta_lead_custom_fields ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ext.meta_lead_custom_fields FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS org_isolation_policy    ON ext.meta_lead_custom_fields;
+DROP POLICY IF EXISTS tenant_isolation_policy ON ext.meta_lead_custom_fields;
 
 CREATE POLICY org_isolation_policy ON ext.meta_lead_custom_fields
   FOR ALL TO app_user
@@ -2910,6 +2928,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS uix_capi_logs_lead_event_success
 
 ALTER TABLE ext.meta_capi_outbound_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ext.meta_capi_outbound_logs FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS org_isolation_policy    ON ext.meta_capi_outbound_logs;
+DROP POLICY IF EXISTS tenant_isolation_policy ON ext.meta_capi_outbound_logs;
 
 CREATE POLICY org_isolation_policy ON ext.meta_capi_outbound_logs
   FOR ALL TO app_user

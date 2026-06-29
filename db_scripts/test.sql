@@ -8,8 +8,10 @@ FROM organizations
 
 
 select users.password_hash,*
-from public.users
+from iam.users
 --This is a bcrypt hash of Admin@123, cost factor 12
+
+
 
 select *
 from public.users
@@ -17,7 +19,8 @@ where users.manager_id is null
 where email = 'komal.hegde@fitclass.in'
 
 select *
-from public.marketing_leads
+from crm.marketing_leads
+
 
 select *
 from public.user_org_mapping
@@ -37,3 +40,8 @@ from public.campaign_statuses
 
 select *
 from public.test
+
+ALTER ROLE lead_svc WITH PASSWORD 'lead_svc_pwd';
+ALTER ROLE tenant_dash_svc WITH PASSWORD 'tenant_dash_svc_pwd';
+
+ALTER ROLE crm_service WITH PASSWORD 'crm_service_pwd';

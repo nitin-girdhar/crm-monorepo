@@ -10,6 +10,7 @@ COPY packages/permissions/package.json packages/permissions/
 COPY packages/db/package.json packages/db/
 COPY packages/validation/package.json packages/validation/
 COPY services/leads-service/package.json services/leads-service/
+RUN echo "shamefully-hoist=true" > .npmrc
 RUN pnpm install --frozen-lockfile
 
 FROM deps AS builder
@@ -39,5 +40,5 @@ COPY packages/permissions/package.json ./packages/permissions/
 COPY packages/db/package.json ./packages/db/
 COPY packages/validation/package.json ./packages/validation/
 COPY services/leads-service/package.json ./services/leads-service/
-EXPOSE 4002
+EXPOSE 4003
 CMD ["node", "services/leads-service/dist/server.js"]

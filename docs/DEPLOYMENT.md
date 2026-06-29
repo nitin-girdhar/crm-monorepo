@@ -54,6 +54,7 @@ Open a terminal in the project root:
 
 ```powershell
 docker compose build
+docker compose build --no-cache # force buid
 ```
 
 This builds all 12 images (10 services + api-gateway + web). First build takes 5–15 minutes; subsequent builds use layer caching and are faster.
@@ -84,23 +85,20 @@ crm-monorepo-web
 
 ### Step 3 — Export images to tarball
 
-Save all images into a single compressed file:
+Save all images into a single file.
+
+**Option A — Without compression (PowerShell, faster):**
 
 ```powershell
-docker save `
-  postgres:18.4 `
-  crm-monorepo-auth-service `
-  crm-monorepo-users-service `
-  crm-monorepo-leads-service `
-  crm-monorepo-assignments-service `
-  crm-monorepo-analytics-service `
-  crm-monorepo-activities-service `
-  crm-monorepo-communication-service `
-  crm-monorepo-meta-conversion-api `
-  crm-monorepo-notifications-service `
-  crm-monorepo-api-gateway `
-  crm-monorepo-web `
-  | gzip > crm-images.tar.gz
+docker save -o crm-images.tar postgres:18.4 crm-monorepo-auth-service crm-monorepo-users-service crm-monorepo-leads-service crm-monorepo-assignments-service crm-monorepo-analytics-service crm-monorepo-activities-service crm-monorepo-communication-service crm-monorepo-meta-conversion-api crm-monorepo-notifications-service crm-monorepo-api-gateway crm-monorepo-web
+```
+
+Resulting file will be approximately 3–4 GB (uncompressed).
+
+**Option B — With compression (Git Bash, smaller file):**
+
+```bash
+docker save postgres:18.4 crm-monorepo-auth-service crm-monorepo-users-service crm-monorepo-leads-service crm-monorepo-assignments-service crm-monorepo-analytics-service crm-monorepo-activities-service crm-monorepo-communication-service crm-monorepo-meta-conversion-api crm-monorepo-notifications-service crm-monorepo-api-gateway crm-monorepo-web | gzip > crm-images.tar.gz
 ```
 
 Resulting file will be approximately 1.5–2.5 GB.
@@ -168,6 +166,9 @@ DATABASE_URL_SERVICE=postgres://crm_service:<SERVICE-PWD>@localhost:5432/crm
 # PostgreSQL pool tuning
 PG_MAX=10
 PG_IDLE_TIMEOUT=30
+
+# IMPORTANT: Disable SSL for Docker-to-Docker connections (no SSL cert on the container)
+PG_SSL_MODE=disable
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Secrets — CHANGE ALL OF THESE
@@ -316,7 +317,11 @@ Expected:
 ```bash
 cd /opt/crm
 
-# Load all images from the tarball (takes 1–3 minutes)
+# Load images from tarball (takes 1–3 minutes)
+# If you used Option A (uncompressed .tar):
+docker load < crm-images.tar
+
+# If you used Option B (compressed .tar.gz):
 docker load < crm-images.tar.gz
 
 # Verify all images are loaded
@@ -351,19 +356,19 @@ auth-service:
 
 Apply this change to **every service** (the `postgres` service already uses `image:` and needs no change):
 
-| Service | Image name |
-|---|---|
-| `auth-service` | `crm-monorepo-auth-service` |
-| `users-service` | `crm-monorepo-users-service` |
-| `leads-service` | `crm-monorepo-leads-service` |
-| `assignments-service` | `crm-monorepo-assignments-service` |
-| `analytics-service` | `crm-monorepo-analytics-service` |
-| `activities-service` | `crm-monorepo-activities-service` |
+| Service                 | Image name                           |
+| ----------------------- | ------------------------------------ |
+| `auth-service`          | `crm-monorepo-auth-service`          |
+| `users-service`         | `crm-monorepo-users-service`         |
+| `leads-service`         | `crm-monorepo-leads-service`         |
+| `assignments-service`   | `crm-monorepo-assignments-service`   |
+| `analytics-service`     | `crm-monorepo-analytics-service`     |
+| `activities-service`    | `crm-monorepo-activities-service`    |
 | `communication-service` | `crm-monorepo-communication-service` |
-| `meta-conversion-api` | `crm-monorepo-meta-conversion-api` |
+| `meta-conversion-api`   | `crm-monorepo-meta-conversion-api`   |
 | `notifications-service` | `crm-monorepo-notifications-service` |
-| `api-gateway` | `crm-monorepo-api-gateway` |
-| `web` | `crm-monorepo-web` |
+| `api-gateway`           | `crm-monorepo-api-gateway`           |
+| `web`                   | `crm-monorepo-web`                   |
 
 > **Tip:** Confirm exact image names from `docker images` output. Names depend on the project folder name on the build machine.
 
@@ -725,13 +730,13 @@ curl -s http://localhost:4040/api/tunnels | python3 -m json.tool
 
 ### ngrok free tier limitations
 
-| Limitation | Detail |
-|---|---|
-| **Random URLs** | URL changes every time ngrok restarts (e.g., `abc123.ngrok-free.app`). Paid plans offer fixed subdomains. |
-| **One tunnel per account** | Free tier allows only one active tunnel. To expose both web (3000) and API (4000), you need two accounts or a paid plan. |
-| **Interstitial warning page** | First-time visitors see an ngrok branding/warning page before reaching your app. |
-| **Rate limits** | 1 online ngrok process, 20 connections/min, 60 connections/min burst on free tier. Sufficient for 50 users with normal usage patterns. |
-| **No custom domain** | Free tier uses `*.ngrok-free.app`. Custom domains require a paid plan. |
+| Limitation                    | Detail                                                                                                                                 |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| **Random URLs**               | URL changes every time ngrok restarts (e.g., `abc123.ngrok-free.app`). Paid plans offer fixed subdomains.                              |
+| **One tunnel per account**    | Free tier allows only one active tunnel. To expose both web (3000) and API (4000), you need two accounts or a paid plan.               |
+| **Interstitial warning page** | First-time visitors see an ngrok branding/warning page before reaching your app.                                                       |
+| **Rate limits**               | 1 online ngrok process, 20 connections/min, 60 connections/min burst on free tier. Sufficient for 50 users with normal usage patterns. |
+| **No custom domain**          | Free tier uses `*.ngrok-free.app`. Custom domains require a paid plan.                                                                 |
 
 ### ngrok dashboard
 
@@ -747,39 +752,39 @@ This is ngrok's local web dashboard — accessible only from the laptop itself.
 
 ## Quick Reference
 
-| Task | Command |
-|---|---|
-| Start stack | `docker compose up -d` |
-| Stop stack | `docker compose down` |
-| View status | `docker compose ps` |
-| View all logs | `docker compose logs -f` |
-| View one service log | `docker compose logs -f <service>` |
-| Restart one service | `docker compose restart <service>` |
-| Resource usage | `docker stats` |
-| Backup database | `docker exec crm-db-server pg_dump -U postgres crm > backup.sql` |
-| Restore database | `cat backup.sql \| docker exec -i crm-db-server psql -U postgres crm` |
-| Find laptop LAN IP | `hostname -I` |
-| Load new images | `docker load < crm-images.tar.gz` |
-| Clean old images | `docker image prune -f` |
+| Task                 | Command                                                               |
+| -------------------- | --------------------------------------------------------------------- |
+| Start stack          | `docker compose up -d`                                                |
+| Stop stack           | `docker compose down`                                                 |
+| View status          | `docker compose ps`                                                   |
+| View all logs        | `docker compose logs -f`                                              |
+| View one service log | `docker compose logs -f <service>`                                    |
+| Restart one service  | `docker compose restart <service>`                                    |
+| Resource usage       | `docker stats`                                                        |
+| Backup database      | `docker exec crm-db-server pg_dump -U postgres crm > backup.sql`      |
+| Restore database     | `cat backup.sql \| docker exec -i crm-db-server psql -U postgres crm` |
+| Find laptop LAN IP   | `hostname -I`                                                         |
+| Load new images      | `docker load < crm-images.tar.gz`                                     |
+| Clean old images     | `docker image prune -f`                                               |
 
 ---
 
 ## Container Inventory
 
-| # | Container | Image | Port | Depends On |
-|---|---|---|---|---|
-| 1 | postgres | `postgres:18.4` | 5432 (internal) | — |
-| 2 | auth-service | `crm-monorepo-auth-service` | 4001 (internal) | postgres |
-| 3 | users-service | `crm-monorepo-users-service` | 4002 (internal) | postgres |
-| 4 | leads-service | `crm-monorepo-leads-service` | 4003 (internal) | postgres |
-| 5 | assignments-service | `crm-monorepo-assignments-service` | 4004 (internal) | postgres |
-| 6 | analytics-service | `crm-monorepo-analytics-service` | 4005 (internal) | postgres |
-| 7 | activities-service | `crm-monorepo-activities-service` | 4006 (internal) | postgres |
-| 8 | communication-service | `crm-monorepo-communication-service` | 4009 (internal) | — |
-| 9 | meta-conversion-api | `crm-monorepo-meta-conversion-api` | 4007 (internal) | postgres |
-| 10 | notifications-service | `crm-monorepo-notifications-service` | 4008 (internal) | postgres |
-| 11 | api-gateway | `crm-monorepo-api-gateway` | **4000 (exposed)** | all services |
-| 12 | web | `crm-monorepo-web` | **3000 (exposed)** | api-gateway |
+| #   | Container             | Image                                | Port               | Depends On   |
+| --- | --------------------- | ------------------------------------ | ------------------ | ------------ |
+| 1   | postgres              | `postgres:18.4`                      | 5432 (internal)    | —            |
+| 2   | auth-service          | `crm-monorepo-auth-service`          | 4001 (internal)    | postgres     |
+| 3   | users-service         | `crm-monorepo-users-service`         | 4002 (internal)    | postgres     |
+| 4   | leads-service         | `crm-monorepo-leads-service`         | 4003 (internal)    | postgres     |
+| 5   | assignments-service   | `crm-monorepo-assignments-service`   | 4004 (internal)    | postgres     |
+| 6   | analytics-service     | `crm-monorepo-analytics-service`     | 4005 (internal)    | postgres     |
+| 7   | activities-service    | `crm-monorepo-activities-service`    | 4006 (internal)    | postgres     |
+| 8   | communication-service | `crm-monorepo-communication-service` | 4009 (internal)    | —            |
+| 9   | meta-conversion-api   | `crm-monorepo-meta-conversion-api`   | 4007 (internal)    | postgres     |
+| 10  | notifications-service | `crm-monorepo-notifications-service` | 4008 (internal)    | postgres     |
+| 11  | api-gateway           | `crm-monorepo-api-gateway`           | **4000 (exposed)** | all services |
+| 12  | web                   | `crm-monorepo-web`                   | **3000 (exposed)** | api-gateway  |
 
 ---
 

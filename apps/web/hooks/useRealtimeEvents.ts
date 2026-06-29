@@ -2,8 +2,6 @@
 
 import { useEffect, useRef } from 'react';
 
-const SSE_BASE_URL = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:4000';
-
 interface RealtimeEvent {
   lead_id: string;
   action: string;
@@ -25,6 +23,20 @@ export interface RealtimeCallbacks {
   onFollowUpDue?: (data: FollowUpDueEvent) => void;
 }
 
+let cachedApiUrl: string | null = null;
+
+async function getApiUrl(): Promise<string> {
+  if (cachedApiUrl) return cachedApiUrl;
+  try {
+    const res = await fetch('/api/config');
+    const data = await res.json();
+    cachedApiUrl = data.apiUrl;
+    return cachedApiUrl!;
+  } catch {
+    return 'http://localhost:4000';
+  }
+}
+
 export function useRealtimeEvents(
   currentUserId: string | undefined,
   callbacks: RealtimeCallbacks,
@@ -35,35 +47,41 @@ export function useRealtimeEvents(
   useEffect(() => {
     if (!currentUserId) return;
 
-    // Connect directly to the API gateway — bypasses the Next.js rewrite
-    // proxy which has a 30s timeout that kills SSE connections.
-    const es = new EventSource(`${SSE_BASE_URL}/notifications/stream`, { withCredentials: true });
+    let es: EventSource | null = null;
+    let cancelled = false;
 
-    es.addEventListener('lead:created', (e) => {
-      const data = JSON.parse(e.data) as RealtimeEvent;
-      if (data.actor_id === currentUserId) return;
-      callbacksRef.current.onLeadCreated?.(data.lead_id);
-    });
+    getApiUrl().then((apiUrl) => {
+      if (cancelled) return;
 
-    es.addEventListener('lead:updated', (e) => {
-      const data = JSON.parse(e.data) as RealtimeEvent;
-      if (data.actor_id === currentUserId) return;
-      callbacksRef.current.onLeadUpdated?.(data.lead_id);
-    });
+      es = new EventSource(`${apiUrl}/notifications/stream`, { withCredentials: true });
 
-    es.addEventListener('lead:deleted', (e) => {
-      const data = JSON.parse(e.data) as RealtimeEvent;
-      if (data.actor_id === currentUserId) return;
-      callbacksRef.current.onLeadDeleted?.(data.lead_id);
-    });
+      es.addEventListener('lead:created', (e) => {
+        const data = JSON.parse(e.data) as RealtimeEvent;
+        if (data.actor_id === currentUserId) return;
+        callbacksRef.current.onLeadCreated?.(data.lead_id);
+      });
 
-    es.addEventListener('followup:due', (e) => {
-      const data = JSON.parse(e.data) as FollowUpDueEvent;
-      callbacksRef.current.onFollowUpDue?.(data);
+      es.addEventListener('lead:updated', (e) => {
+        const data = JSON.parse(e.data) as RealtimeEvent;
+        if (data.actor_id === currentUserId) return;
+        callbacksRef.current.onLeadUpdated?.(data.lead_id);
+      });
+
+      es.addEventListener('lead:deleted', (e) => {
+        const data = JSON.parse(e.data) as RealtimeEvent;
+        if (data.actor_id === currentUserId) return;
+        callbacksRef.current.onLeadDeleted?.(data.lead_id);
+      });
+
+      es.addEventListener('followup:due', (e) => {
+        const data = JSON.parse(e.data) as FollowUpDueEvent;
+        callbacksRef.current.onFollowUpDue?.(data);
+      });
     });
 
     return () => {
-      es.close();
+      cancelled = true;
+      es?.close();
     };
   }, [currentUserId]);
 }

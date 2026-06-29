@@ -9,6 +9,7 @@ COPY packages/auth-constants/package.json packages/auth-constants/
 COPY packages/permissions/package.json packages/permissions/
 COPY packages/db/package.json packages/db/
 COPY services/notifications-service/package.json services/notifications-service/
+RUN echo "shamefully-hoist=true" > .npmrc
 RUN pnpm install --frozen-lockfile
 
 FROM deps AS builder

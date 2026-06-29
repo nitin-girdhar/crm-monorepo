@@ -11,6 +11,7 @@ COPY packages/db/package.json packages/db/
 COPY packages/validation/package.json packages/validation/
 COPY packages/internal-client/package.json packages/internal-client/
 COPY services/auth-service/package.json services/auth-service/
+RUN echo "shamefully-hoist=true" > .npmrc
 RUN pnpm install --frozen-lockfile
 
 FROM deps AS builder

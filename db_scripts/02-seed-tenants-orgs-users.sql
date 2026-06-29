@@ -1,4 +1,4 @@
-
+--rollback
 -- ===================================================================
 -- CRM Monorepo — Bulk Demo Seed: STEP 2
 -- Tenants + Organizations + Users (full role hierarchy)
