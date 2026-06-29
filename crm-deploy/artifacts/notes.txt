@@ -1,0 +1,96 @@
+CRM Deployment — Quick Setup (Linux)
+=====================================
+
+1. INSTALL DOCKER
+-----------------
+sudo apt update && sudo apt install -y docker.io docker-compose-v2
+sudo usermod -aG docker $USER
+newgrp docker
+
+2. COPY FILES & SETUP
+---------------------
+sudo mkdir -p /opt/crm/data/postgres /opt/crm/backups /opt/crm/db_scripts
+sudo chown -R $USER:$USER /opt/crm
+
+# Copy all artifacts to /opt/crm/
+cp crm-images.tar.gz docker-compose.yml deploy.sh .env.example /opt/crm/
+cp db_scripts/01_init-db.sql /opt/crm/db_scripts/
+cd /opt/crm
+cp .env.example .env
+
+3. EDIT .env (MANDATORY)
+------------------------
+nano /opt/crm/.env
+
+Change these values:
+  POSTGRES_PASSWORD=<strong-password>
+  DB_LEAD_SVC_PASSWORD=<must-match-01_init-db.sql>
+  DB_TENANT_SVC_PASSWORD=<must-match-01_init-db.sql>
+  DB_SERVICE_PASSWORD=<must-match-01_init-db.sql>
+  JWT_SECRET=<generate-with-command-below>
+  INTERNAL_SERVICE_SECRET=<generate-with-command-below>
+  WEBHOOK_API_KEY=<generate-with-command-below>
+  DB_DATA_PATH=/opt/crm/data/postgres
+  NEXT_PUBLIC_API_URL=http://<THIS-LAPTOP-LAN-IP>:4000
+  WEB_URL=http://<THIS-LAPTOP-LAN-IP>:3000
+
+Generate secrets:
+  openssl rand -base64 48
+
+Find this laptop's LAN IP:
+  hostname -I
+
+4. DEPLOY
+---------
+cd /opt/crm
+sudo bash deploy.sh
+
+5. VERIFY
+---------
+docker compose ps
+curl http://localhost:3000
+curl http://localhost:4000
+
+Open browser: http://localhost:3000
+
+6. FIREWALL
+-----------
+sudo ufw enable
+sudo ufw allow 22/tcp
+sudo ufw allow 3000/tcp
+sudo ufw allow 4000/tcp
+
+7. EVERYDAY COMMANDS
+--------------------
+cd /opt/crm
+
+Start:          docker compose up -d
+Stop:           docker compose down
+Restart one:    docker compose restart auth-service
+Logs (all):     docker compose logs -f
+Logs (one):     docker compose logs -f api-gateway
+Status:         docker compose ps
+Resources:      docker stats
+
+8. REDEPLOY (after receiving new images)
+----------------------------------------
+cd /opt/crm
+sudo bash deploy.sh --redeploy
+
+9. DATABASE BACKUP & RESTORE
+-----------------------------
+Backup:
+  docker exec crm-db-server pg_dump -U postgres crm > /opt/crm/backups/crm_$(date +%Y%m%d).sql
+
+Restore:
+  cat /opt/crm/backups/crm_20260629.sql | docker exec -i crm-db-server psql -U postgres crm
+
+Auto daily backup (crontab -e):
+  0 2 * * * docker exec crm-db-server pg_dump -U postgres crm > /opt/crm/backups/crm_$(date +\%Y\%m\%d).sql 2>&1
+
+10. TROUBLESHOOTING
+-------------------
+Container restarting:   docker compose logs <service-name> --tail=100
+Port conflict:          sudo lsof -i :3000
+DB credentials issue:   docker exec -it crm-db-server psql -U crm_service -d crm -c "SELECT 1"
+Disk space:             df -h && docker system prune -f

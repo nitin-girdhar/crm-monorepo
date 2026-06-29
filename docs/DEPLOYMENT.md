@@ -319,7 +319,7 @@ cd /opt/crm
 
 # Load images from tarball (takes 1–3 minutes)
 # If you used Option A (uncompressed .tar):
-docker load < crm-images.tar
+
 
 # If you used Option B (compressed .tar.gz):
 docker load < crm-images.tar.gz

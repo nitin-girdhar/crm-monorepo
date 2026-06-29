@@ -172,7 +172,7 @@ export default function LeadsHistoryShell({ actor }: Props) {
   };
 
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-4 p-4 sm:p-6">
+    <div className="w-full space-y-4 p-4 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-[#0F172A]">Leads History</h1>

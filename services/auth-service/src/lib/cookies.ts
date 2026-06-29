@@ -13,7 +13,7 @@ export function sessionCookieOptions(): CookieOptions {
   return {
     httpOnly: true,
     sameSite: 'lax',
-    secure: config.nodeEnv === 'production',
+    secure: config.secureCookies,
     path: '/',
     maxAge: JWT_MAX_AGE_SECONDS,
   };

@@ -9,16 +9,25 @@ interface ActivityPayload {
   lead_id?: string;
   old_value?: unknown;
   new_value?: unknown;
+  org_id?: string;
+  tenant_id?: string;
+  role?: string;
 }
 
 export async function logActivity(payload: ActivityPayload): Promise<void> {
   try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'X-Internal-Secret': INTERNAL_SECRET,
+      'X-User-Id': payload.performed_by || 'system',
+      'X-User-Role': payload.role || 'system',
+      'X-Org-Id': payload.org_id || 'system',
+    };
+    if (payload.tenant_id) headers['X-Tenant-Id'] = payload.tenant_id;
+
     await fetch(`${config.activitiesServiceUrl}/api/v1/activities`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Internal-Secret': INTERNAL_SECRET,
-      },
+      headers,
       body: JSON.stringify(payload),
     });
   } catch (err) {

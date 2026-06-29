@@ -26,9 +26,7 @@ services:
       retries: 10
 
   auth-service:
-    build:
-      context: .
-      dockerfile: services/auth-service/Dockerfile
+    image: crm-monorepo-auth-service
     restart: unless-stopped
     env_file: .env
     environment:
@@ -42,9 +40,7 @@ services:
         condition: service_healthy
 
   users-service:
-    build:
-      context: .
-      dockerfile: services/users-service/Dockerfile
+    image: crm-monorepo-users-service
     restart: unless-stopped
     env_file: .env
     environment:
@@ -58,9 +54,7 @@ services:
         condition: service_healthy
 
   leads-service:
-    build:
-      context: .
-      dockerfile: services/leads-service/Dockerfile
+    image: crm-monorepo-leads-service
     restart: unless-stopped
     env_file: .env
     environment:
@@ -75,9 +69,7 @@ services:
         condition: service_healthy
 
   assignments-service:
-    build:
-      context: .
-      dockerfile: services/assignments-service/Dockerfile
+    image: crm-monorepo-assignments-service
     restart: unless-stopped
     env_file: .env
     environment:
@@ -91,9 +83,7 @@ services:
         condition: service_healthy
 
   analytics-service:
-    build:
-      context: .
-      dockerfile: services/analytics-service/Dockerfile
+    image: crm-monorepo-analytics-service
     restart: unless-stopped
     env_file: .env
     environment:
@@ -106,9 +96,7 @@ services:
         condition: service_healthy
 
   activities-service:
-    build:
-      context: .
-      dockerfile: services/activities-service/Dockerfile
+    image: crm-monorepo-activities-service
     restart: unless-stopped
     env_file: .env
     environment:
@@ -121,9 +109,7 @@ services:
         condition: service_healthy
 
   notifications-service:
-    build:
-      context: .
-      dockerfile: services/notifications-service/Dockerfile
+    image: crm-monorepo-notifications-service
     restart: unless-stopped
     env_file: .env
     environment:
@@ -136,9 +122,7 @@ services:
         condition: service_healthy
 
   communication-service:
-    build:
-      context: .
-      dockerfile: services/communication-service/Dockerfile
+    image: crm-monorepo-communication-service
     restart: unless-stopped
     env_file: .env
     environment:
@@ -147,9 +131,7 @@ services:
       - "${COMMUNICATION_SERVICE_PORT}:${COMMUNICATION_SERVICE_PORT}"
 
   meta-conversion-api:
-    build:
-      context: .
-      dockerfile: services/meta-conversion-api/Dockerfile
+    image: crm-monorepo-meta-conversion-api
     restart: unless-stopped
     env_file: .env
     environment:
@@ -162,9 +144,7 @@ services:
         condition: service_healthy
 
   api-gateway:
-    build:
-      context: .
-      dockerfile: services/api-gateway/Dockerfile
+    image: crm-monorepo-api-gateway
     restart: unless-stopped
     env_file: .env
     environment:
@@ -204,11 +184,7 @@ services:
         condition: service_started
 
   web:
-    build:
-      context: .
-      dockerfile: apps/web/Dockerfile
-      args:
-        NEXT_PUBLIC_API_URL: http://api-gateway:${GATEWAY_PORT}
+    image: crm-monorepo-web
     restart: unless-stopped
     env_file: .env
     environment:

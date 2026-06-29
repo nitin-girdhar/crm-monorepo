@@ -13,4 +13,5 @@ export const config = {
   databaseUrlService: requireEnv('DATABASE_URL_SERVICE'),
   logLevel: process.env['LOG_LEVEL'] ?? 'info',
   activitiesServiceUrl: process.env['ACTIVITIES_SERVICE_URL'] ?? 'http://localhost:4006',
+  secureCookies: process.env['COOKIE_SECURE'] === 'true',
 } as const;

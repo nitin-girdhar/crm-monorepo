@@ -17,18 +17,22 @@ export async function login(input: LoginInput): Promise<LoginResult> {
   const db_user = await repo.getUserByEmail(input.email, input.org_id);
 
   if (!db_user) {
-    await logActivity({
+    void logActivity({
       action_type: 'login_failure',
       performed_by: 'unknown',
+      ...(input.org_id ? { org_id: input.org_id } : {}),
       new_value: { email: input.email, reason: 'user_not_found' },
     });
     throw new UnauthorizedError('Invalid email or password');
   }
 
   if (!db_user.is_active) {
-    await logActivity({
+    void logActivity({
       action_type: 'login_failure',
       performed_by: db_user.id,
+      org_id: db_user.org_id,
+      tenant_id: db_user.tenant_id,
+      role: db_user.role_name,
       new_value: { email: input.email, reason: 'account_inactive' },
     });
     throw new UnauthorizedError('Account is deactivated. Please contact your administrator.');
@@ -39,9 +43,12 @@ export async function login(input: LoginInput): Promise<LoginResult> {
     : false;
 
   if (!password_valid) {
-    await logActivity({
+    void logActivity({
       action_type: 'login_failure',
       performed_by: db_user.id,
+      org_id: db_user.org_id,
+      tenant_id: db_user.tenant_id,
+      role: db_user.role_name,
       new_value: { email: input.email, reason: 'invalid_password' },
     });
     throw new UnauthorizedError('Invalid email or password');
@@ -62,7 +69,7 @@ export async function login(input: LoginInput): Promise<LoginResult> {
   });
 
   await repo.updateLastLogin(db_user.id);
-  await logActivity({ action_type: 'login_success', performed_by: db_user.id });
+  await logActivity({ action_type: 'login_success', performed_by: db_user.id, org_id: db_user.org_id, tenant_id: db_user.tenant_id, role: db_user.role_name });
 
   return {
     token,
@@ -79,7 +86,7 @@ export async function logout(token: string | undefined): Promise<void> {
       org_id: result.payload.org_id,
       tenant_id: result.payload.tenant_id,
     });
-    void logActivity({ action_type: 'logout', performed_by: result.payload.sub });
+    void logActivity({ action_type: 'logout', performed_by: result.payload.sub, org_id: result.payload.org_id, tenant_id: result.payload.tenant_id, role: result.payload.role });
   }
 }
 
@@ -148,7 +155,7 @@ export async function changePassword(
     pwd_iat,
   });
 
-  await logActivity({ action_type: 'password_changed_self', performed_by: user_id });
+  await logActivity({ action_type: 'password_changed_self', performed_by: user_id, org_id: db_user.org_id, tenant_id: db_user.tenant_id, role: db_user.role_name });
 
   return new_token;
 }
