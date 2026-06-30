@@ -21,6 +21,28 @@ body:json {
     "pixel_id": "your-pixel-id",
     "access_token": "your-meta-access-token",
     "graph_api_version": "v21.0",
-    "capi_trigger_stages": []
+    "capi_trigger_stages": [],
+    "field_mappings": {
+      "contact": {
+        "phone": ["phone", "phone_number", "mobile_number"],
+        "email": ["email"]
+      },
+      "address": {
+        "city": ["city", "town"]
+      },
+      "professional": {
+        "job_title": ["job_title", "designation"]
+      },
+      "demographics": {
+        "gender": ["gender", "sex"]
+      }
+    }
   }
+}
+
+docs {
+  field_mappings is optional. Any category/key omitted falls back to
+  DEFAULT_FIELD_MAPPINGS in meta.config.ts. Each db column maps to an
+  ordered list of candidate Meta form field keys — the first matching
+  key in the lead's field_data wins.
 }

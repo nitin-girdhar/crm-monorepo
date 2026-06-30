@@ -13,3 +13,9 @@ get {
 headers {
   Cookie: auth_token={{authToken}}
 }
+
+docs {
+  Response now includes field_mappings (per-org override of Meta form
+  field keys, or null if the org hasn't customized any mappings — in
+  which case DEFAULT_FIELD_MAPPINGS in meta.config.ts applies).
+}

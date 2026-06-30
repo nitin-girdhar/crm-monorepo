@@ -128,7 +128,7 @@ export async function handleWebhookPost(
           ...(rawLead.adset_id !== undefined ? { adset_id: rawLead.adset_id } : {}),
           ...(rawLead.campaign_id !== undefined ? { campaign_id: rawLead.campaign_id } : {}),
           field_data: rawLead.field_data,
-        });
+        }, integration.field_mappings);
 
         request.log.info(
           `Lead synced | metaLeadId=${leadId} marketingLeadId=${syncResult.marketingLeadId} duplicate=${syncResult.isDuplicate}`,

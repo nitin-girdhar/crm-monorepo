@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { withServiceTx } from '@crm/db';
-import { metaConfig } from '../config/meta.config.js';
+import { resolveFieldMappings, type FieldMappingsConfig, type ResolvedFieldMappings } from '../config/meta.config.js';
 
 export interface MetaLeadFieldData {
   name: string;
@@ -42,14 +42,22 @@ function extractFieldValue(fieldData: MetaLeadFieldData[], metaKey: string): str
   return field?.values[0]?.trim() || undefined;
 }
 
-function buildContactPayload(fieldData: MetaLeadFieldData[]) {
-  const phone = extractFieldValue(fieldData, 'phone');
+function extractByKeys(fieldData: MetaLeadFieldData[], keys: string[] | undefined): string | undefined {
+  for (const key of keys ?? []) {
+    const v = extractFieldValue(fieldData, key);
+    if (v) return v;
+  }
+  return undefined;
+}
+
+function buildContactPayload(fieldData: MetaLeadFieldData[], mappings: ResolvedFieldMappings) {
+  const phone = extractByKeys(fieldData, mappings.contact.phone);
   if (!phone) throw new Error('Lead payload is missing a required phone value');
 
-  const email = extractFieldValue(fieldData, 'email') ?? null;
+  const email = extractByKeys(fieldData, mappings.contact.email) ?? null;
   let firstName: string | null = null;
   let lastName: string | null = null;
-  const fullName = extractFieldValue(fieldData, 'full_name') ?? null;
+  const fullName = extractByKeys(fieldData, mappings.contact.full_name) ?? null;
 
   if (fullName) {
     const parts = fullName.split(' ');
@@ -57,21 +65,61 @@ function buildContactPayload(fieldData: MetaLeadFieldData[]) {
     lastName = parts.slice(1).join(' ') || null;
   }
 
-  const fnVal = extractFieldValue(fieldData, 'first_name');
+  const fnVal = extractByKeys(fieldData, mappings.contact.first_name);
   if (fnVal) firstName = fnVal;
-  const lnVal = extractFieldValue(fieldData, 'last_name');
+  const lnVal = extractByKeys(fieldData, mappings.contact.last_name);
   if (lnVal) lastName = lnVal;
 
-  const whatsappNumber = extractFieldValue(fieldData, 'whatsapp_number') ?? null;
+  const whatsappNumber = extractByKeys(fieldData, mappings.contact.whatsapp_number) ?? null;
 
   return { email, phone, firstName, lastName, fullName, whatsappNumber };
+}
+
+function buildAddressPayload(fieldData: MetaLeadFieldData[], mappings: ResolvedFieldMappings) {
+  return {
+    streetAddress: extractByKeys(fieldData, mappings.address.street_address) ?? null,
+    city: extractByKeys(fieldData, mappings.address.city) ?? null,
+    state: extractByKeys(fieldData, mappings.address.state) ?? null,
+    province: extractByKeys(fieldData, mappings.address.province) ?? null,
+    country: extractByKeys(fieldData, mappings.address.country) ?? null,
+    postalCode: extractByKeys(fieldData, mappings.address.postal_code) ?? null,
+    zipCode: extractByKeys(fieldData, mappings.address.zip_code) ?? null,
+  };
+}
+
+function buildProfessionalPayload(fieldData: MetaLeadFieldData[], mappings: ResolvedFieldMappings) {
+  return {
+    jobTitle: extractByKeys(fieldData, mappings.professional.job_title) ?? null,
+    companyName: extractByKeys(fieldData, mappings.professional.company_name) ?? null,
+    workEmail: extractByKeys(fieldData, mappings.professional.work_email) ?? null,
+    workPhoneNumber: extractByKeys(fieldData, mappings.professional.work_phone_number) ?? null,
+  };
+}
+
+function buildDemographicsPayload(fieldData: MetaLeadFieldData[], mappings: ResolvedFieldMappings) {
+  return {
+    dateOfBirth: extractByKeys(fieldData, mappings.demographics.date_of_birth) ?? null,
+    gender: extractByKeys(fieldData, mappings.demographics.gender) ?? null,
+    maritalStatus: extractByKeys(fieldData, mappings.demographics.marital_status) ?? null,
+    relationshipStatus: extractByKeys(fieldData, mappings.demographics.relationship_status) ?? null,
+    militaryStatus: extractByKeys(fieldData, mappings.demographics.military_status) ?? null,
+  };
+}
+
+function hasAnyValue(payload: Record<string, string | null>): boolean {
+  return Object.values(payload).some((v) => v !== null);
 }
 
 export async function syncLeadToDatabase(
   orgId: string,
   lead: RawMetaLead,
+  orgFieldMappings?: FieldMappingsConfig | null,
 ): Promise<SyncLeadResult> {
-  const contact = buildContactPayload(lead.field_data);
+  const mappings = resolveFieldMappings(orgFieldMappings);
+  const contact = buildContactPayload(lead.field_data, mappings);
+  const address = buildAddressPayload(lead.field_data, mappings);
+  const professional = buildProfessionalPayload(lead.field_data, mappings);
+  const demographics = buildDemographicsPayload(lead.field_data, mappings);
 
   return withServiceTx(async (tx) => {
     // Dedup: check if this Meta lead was already synced
@@ -156,10 +204,46 @@ export async function syncLeadToDatabase(
     );
     const metaLeadRowId = (metaLeadResult as unknown as Array<{ id: string }>)[0]!.id;
 
-    // Insert custom fields for unmapped data
+    // Insert structured address/professional/demographics extensions when present
+    if (hasAnyValue(address)) {
+      await tx.execute(
+        sql`INSERT INTO ext.meta_lead_addresses (
+              meta_lead_id, org_id, street_address, city, state, province, country, postal_code, zip_code
+            ) VALUES (
+              ${metaLeadRowId}, ${orgId}, ${address.streetAddress}, ${address.city}, ${address.state},
+              ${address.province}, ${address.country}, ${address.postalCode}, ${address.zipCode}
+            )`,
+      );
+    }
+
+    if (hasAnyValue(professional)) {
+      await tx.execute(
+        sql`INSERT INTO ext.meta_lead_professional (
+              meta_lead_id, org_id, job_title, company_name, work_email, work_phone_number
+            ) VALUES (
+              ${metaLeadRowId}, ${orgId}, ${professional.jobTitle}, ${professional.companyName},
+              ${professional.workEmail}, ${professional.workPhoneNumber}
+            )`,
+      );
+    }
+
+    if (hasAnyValue(demographics)) {
+      await tx.execute(
+        sql`INSERT INTO ext.meta_lead_demographics (
+              meta_lead_id, org_id, date_of_birth, gender, marital_status, relationship_status, military_status
+            ) VALUES (
+              ${metaLeadRowId}, ${orgId}, ${demographics.dateOfBirth}, ${demographics.gender},
+              ${demographics.maritalStatus}, ${demographics.relationshipStatus}, ${demographics.militaryStatus}
+            )`,
+      );
+    }
+
+    // Insert custom fields for any remaining unmapped data
     const knownKeys = new Set([
-      ...metaConfig.field_mappings.map((m) => m.meta_key),
-      'whatsapp_number',
+      ...Object.values(mappings.contact).flat(),
+      ...Object.values(mappings.address).flat(),
+      ...Object.values(mappings.professional).flat(),
+      ...Object.values(mappings.demographics).flat(),
     ]);
 
     const customFields = lead.field_data

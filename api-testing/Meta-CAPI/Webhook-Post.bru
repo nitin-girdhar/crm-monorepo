@@ -42,11 +42,28 @@ docs {
   In production Meta signs the body with X-Hub-Signature-256.
   In development mode (NODE_ENV=development) HMAC is skipped.
 
+  This body only carries leadgen_id/page_id/form_id metadata — that's
+  all the real Meta webhook ever sends. The full field_data (including
+  any address/job-title/demographic answers) is fetched server-side
+  from the Graph API using the integration's access_token, so this
+  request requires a real, working access_token + a real leadgen_id to
+  exercise the full pipeline end-to-end. There is no local stub for the
+  Graph API call.
+
   The service will:
   1. Verify HMAC signature (skipped in dev)
-  2. Fetch lead details from Meta Graph API
-  3. Insert into crm.marketing_leads and ext.meta_leads
-  4. Fire a crm_events pg_notify if not a duplicate
+  2. Fetch lead details from Meta Graph API (field_data lives here)
+  3. Resolve field keys using the org's field_mappings (falls back to
+     DEFAULT_FIELD_MAPPINGS in meta.config.ts when unset)
+  4. Insert into crm.marketing_leads and ext.meta_leads
+  5. Insert any address/job/demographic answers into ext.meta_lead_addresses,
+     ext.meta_lead_professional, ext.meta_lead_demographics (only the
+     tables with at least one matched field get a row)
+  6. Insert any remaining unmapped form fields into ext.meta_lead_custom_fields
+  7. Fire a crm_events pg_notify if not a duplicate
 
   Response: { received: true, processed: N, results: [...] }
+
+  To inspect the extracted data after running this, query
+  ext.view_meta_leads_complete WHERE meta_lead_id = <leadgen_id>.
 }

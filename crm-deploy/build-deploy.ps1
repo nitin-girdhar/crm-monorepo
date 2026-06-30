@@ -102,7 +102,12 @@ $missing = @()
 $savedEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 foreach ($img in $Images) {
-    try { $check = docker images -q $img 2>$null } catch { $check = $null }
+    $check = $null
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try { $check = docker images -q $img 2>$null } catch { $check = $null }
+        if ($check) { break }
+        Start-Sleep -Seconds 2
+    }
     if (-not $check) { $missing += $img }
 }
 $ErrorActionPreference = $savedEAP

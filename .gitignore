@@ -67,3 +67,8 @@ temp/
 
 # ── Misc ───────────────────────────────────────────────────────────────────────
 *.local
+crm-deploy/artifacts/db_scripts/01_init-db.sql
+crm-deploy/artifacts/.env.example
+crm-deploy/artifacts/crm-images.tar.gz
+crm-deploy/artifacts/deploy.sh
+crm-deploy/artifacts/docker-compose.yml

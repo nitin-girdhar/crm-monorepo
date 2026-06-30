@@ -99,7 +99,7 @@ Three postgres.js pools exist, all with `transform: { column: { from: postgres.t
 
 ## Row Level Security
 
-RLS is enabled on `crm.marketing_leads`, `iam.users`, `marketing.ad_campaigns`, `crm.lead_interactions`, `crm.lead_follow_ups`, `crm.lead_assignment_log`, `crm.lead_status_log`, `ext.meta_org_config`, `ext.meta_leads`, `ext.meta_lead_custom_fields`, and `ext.meta_capi_outbound_logs`. Each table has:
+RLS is enabled on `crm.marketing_leads`, `iam.users`, `marketing.ad_campaigns`, `crm.lead_interactions`, `crm.lead_follow_ups`, `crm.lead_assignment_log`, `crm.lead_status_log`, `ext.meta_org_config`, `ext.meta_leads`, `ext.meta_lead_custom_fields`, `ext.meta_capi_outbound_logs`, `ext.meta_lead_addresses`, `ext.meta_lead_professional`, and `ext.meta_lead_demographics`. Each table has:
 
 - `org_isolation_policy` (TO app_user): restricts rows to `org_id = current_setting('app.current_org_id')::uuid`
 
@@ -127,7 +127,9 @@ Bidirectional integration with Meta (Facebook) Lead Ads:
 4. HMAC-SHA256 verification using the org's `app_secret`
 5. Fetches full lead data from Meta Graph API using the org's `access_token`
 6. Creates a `crm.marketing_leads` row (source=facebook, stage=new) and a linked `ext.meta_leads` row
-7. Unmapped form fields stored in `ext.meta_lead_custom_fields`
+7. Field extraction uses the org's `field_mappings` (from `ext.meta_org_config.field_mappings`, JSONB) merged over the hardcoded `DEFAULT_FIELD_MAPPINGS` — lets an org remap Meta form field keys without a redeploy
+8. Address/job/demographic fields are written to `ext.meta_lead_addresses`, `ext.meta_lead_professional`, `ext.meta_lead_demographics` (1:1, only when at least one field is present)
+9. Any remaining unmapped form fields stored in `ext.meta_lead_custom_fields`
 
 ### Outbound flow (CRM → Meta CAPI)
 - **Auto-trigger**: When a lead's stage changes, leads-service fires a fire-and-forget HTTP call to meta-conversion-api. The service checks if the new stage is in `ext.meta_org_config.capi_trigger_stages` and sends a CAPI event if so.
@@ -174,7 +176,7 @@ All packages live in `packages/` and are consumed via workspace references (`@cr
 - `crm.vw_org_performance_snapshot` — per-org metrics
 - `crm.vw_tenant_full_dashboard` — cross-org tenant metrics
 - `crm.vw_rep_performance` — per-sales-rep lead counts by stage
-- `ext.view_meta_leads_complete` — meta_leads joined to marketing_leads
+- `ext.view_meta_leads_complete` — meta_leads joined to marketing_leads, addresses, professional, and demographics
 
 ### Functions
 - `iam.can_assign_to(org_id, acting_user_id, target_user_id)` — authority check (3-param, SECURITY DEFINER)
@@ -182,7 +184,10 @@ All packages live in `packages/` and are consumed via workspace references (`@cr
 - `iam.fn_user_active_orgs(user_id)` / `iam.fn_org_active_users(org_id)` — membership lookups
 
 ### Meta-specific tables (`ext` schema)
-- `ext.meta_org_config` — per-org Meta credentials, pixel ID, CAPI trigger stages
+- `ext.meta_org_config` — per-org Meta credentials, pixel ID, CAPI trigger stages, `field_mappings` (JSONB, runtime-reloadable form field key overrides)
 - `ext.meta_leads` — raw Meta lead data (BIGINT meta_lead_id) linked to crm.marketing_leads via FK
 - `ext.meta_lead_custom_fields` — unmapped form fields (1:many)
+- `ext.meta_lead_addresses` — address fields from Meta lead forms (1:1)
+- `ext.meta_lead_professional` — job/company fields from Meta lead forms (1:1)
+- `ext.meta_lead_demographics` — demographic fields from Meta lead forms (1:1)
 - `ext.meta_capi_outbound_logs` — CAPI event audit trail with idempotency index

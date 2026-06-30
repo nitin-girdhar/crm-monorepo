@@ -112,8 +112,15 @@
 │                                                                                             │
 │  ┌──────────────────┐     ┌──────────────────┐     ┌──────────────────────────┐              │
 │  │ meta_org_config  │     │   meta_leads     │◄────│ meta_lead_custom_fields │              │
-│  │ (per-org creds)  │     │ (raw Meta data)  │ 1:N └──────────────────────────┘              │
-│  └──────────────────┘     └────────┬─────────┘                                              │
+│  │ (per-org creds + │     │ (raw Meta data)  │ 1:N └──────────────────────────┘              │
+│  │  field_mappings) │     └────────┬─────────┘                                              │
+│  └──────────────────┘              │                                                        │
+│                    ┌────────────────┼────────────────┐                                      │
+│                    ▼                ▼                ▼                                      │
+│         ┌────────────────┐ ┌──────────────────┐ ┌──────────────────────┐                    │
+│         │ meta_lead_      │ │ meta_lead_       │ │ meta_lead_           │                    │
+│         │ addresses (1:1) │ │ professional(1:1)│ │ demographics (1:1)   │                    │
+│         └────────────────┘ └──────────────────┘ └──────────────────────┘                    │
 │                                    │                                                        │
 │                                    ▼                                                        │
 │                           ┌────────────────────────┐                                        │
@@ -770,6 +777,7 @@ Per-org Meta Lead Ads credentials and CAPI configuration.
 | graph_api_version   | TEXT        | NOT NULL, DEFAULT 'v21.0'                 |
 | is_active           | BOOLEAN     | NOT NULL, DEFAULT TRUE                    |
 | capi_trigger_stages | UUID[]      | NOT NULL, DEFAULT '{}'                    |
+| field_mappings      | JSONB       | nullable — per-org override of Meta form field keys; falls back to `DEFAULT_FIELD_MAPPINGS` in `meta.config.ts` when NULL |
 | created_at          | TIMESTAMPTZ | NOT NULL, DEFAULT NOW()                   |
 | updated_at          | TIMESTAMPTZ | NOT NULL, DEFAULT NOW()                   |
 
@@ -820,6 +828,64 @@ Unmapped form fields from Meta lead forms (1:many from `ext.meta_leads`).
 | question_value | TEXT |                                          |
 
 **Unique:** `(meta_lead_id, question_key)`  
+**RLS:** org + tenant isolation
+
+---
+
+### ext.meta_lead_addresses
+
+Address fields from Meta lead forms (1:1 from `ext.meta_leads`).
+
+| Column         | Type        | Constraints                                  |
+| -------------- | ----------- | --------------------------------------------- |
+| meta_lead_id   | UUID        | PK, FK → ext.meta_leads(id) ON DELETE CASCADE |
+| org_id         | UUID        | NOT NULL, FK → entity.organizations(id)       |
+| street_address | TEXT        |                                                |
+| city           | TEXT        |                                                |
+| state          | TEXT        |                                                |
+| province       | TEXT        |                                                |
+| country        | TEXT        |                                                |
+| postal_code    | TEXT        |                                                |
+| zip_code       | TEXT        |                                                |
+| created_at     | TIMESTAMPTZ | NOT NULL, DEFAULT NOW()                       |
+
+**RLS:** org + tenant isolation
+
+---
+
+### ext.meta_lead_professional
+
+Job/company fields from Meta lead forms (1:1 from `ext.meta_leads`).
+
+| Column            | Type        | Constraints                                  |
+| ----------------- | ----------- | --------------------------------------------- |
+| meta_lead_id      | UUID        | PK, FK → ext.meta_leads(id) ON DELETE CASCADE |
+| org_id            | UUID        | NOT NULL, FK → entity.organizations(id)       |
+| job_title         | TEXT        |                                                |
+| company_name      | TEXT        |                                                |
+| work_email        | TEXT        |                                                |
+| work_phone_number | TEXT        |                                                |
+| created_at        | TIMESTAMPTZ | NOT NULL, DEFAULT NOW()                       |
+
+**RLS:** org + tenant isolation
+
+---
+
+### ext.meta_lead_demographics
+
+Demographic fields from Meta lead forms (1:1 from `ext.meta_leads`).
+
+| Column              | Type        | Constraints                                  |
+| ------------------- | ----------- | --------------------------------------------- |
+| meta_lead_id        | UUID        | PK, FK → ext.meta_leads(id) ON DELETE CASCADE |
+| org_id              | UUID        | NOT NULL, FK → entity.organizations(id)       |
+| date_of_birth       | DATE        |                                                |
+| gender              | TEXT        |                                                |
+| marital_status      | TEXT        |                                                |
+| relationship_status | TEXT        |                                                |
+| military_status     | TEXT        |                                                |
+| created_at          | TIMESTAMPTZ | NOT NULL, DEFAULT NOW()                       |
+
 **RLS:** org + tenant isolation
 
 ---
@@ -879,7 +945,7 @@ Schema migration tracking.
 | `entity.vw_branch_lookup`                    | entity    | yes              | Branches with org and tenant context                       |
 | `marketing.vw_campaign_lookup`               | marketing | yes              | Campaigns with resolved platform/status                    |
 | `marketing.vw_tenant_campaign_summary`       | marketing | yes              | Campaign performance by tenant                             |
-| `ext.view_meta_leads_complete`               | ext       | yes              | Meta leads joined to CRM marketing_leads                   |
+| `ext.view_meta_leads_complete`               | ext       | yes              | Meta leads joined to CRM marketing_leads, address, professional, demographics |
 
 ---
 

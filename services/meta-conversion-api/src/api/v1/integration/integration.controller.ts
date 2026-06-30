@@ -5,6 +5,39 @@ import { parseAuthContext } from '../../../lib/auth-context.js';
 import { ForbiddenError } from '../../../lib/errors.js';
 import * as integrationService from '../../../services/integration.service.js';
 
+const FieldMappingsSchema = z.object({
+  contact: z.object({
+    phone: z.array(z.string()).optional(),
+    email: z.array(z.string()).optional(),
+    first_name: z.array(z.string()).optional(),
+    last_name: z.array(z.string()).optional(),
+    full_name: z.array(z.string()).optional(),
+    whatsapp_number: z.array(z.string()).optional(),
+  }).optional(),
+  address: z.object({
+    street_address: z.array(z.string()).optional(),
+    city: z.array(z.string()).optional(),
+    state: z.array(z.string()).optional(),
+    province: z.array(z.string()).optional(),
+    country: z.array(z.string()).optional(),
+    postal_code: z.array(z.string()).optional(),
+    zip_code: z.array(z.string()).optional(),
+  }).optional(),
+  professional: z.object({
+    job_title: z.array(z.string()).optional(),
+    company_name: z.array(z.string()).optional(),
+    work_email: z.array(z.string()).optional(),
+    work_phone_number: z.array(z.string()).optional(),
+  }).optional(),
+  demographics: z.object({
+    date_of_birth: z.array(z.string()).optional(),
+    gender: z.array(z.string()).optional(),
+    marital_status: z.array(z.string()).optional(),
+    relationship_status: z.array(z.string()).optional(),
+    military_status: z.array(z.string()).optional(),
+  }).optional(),
+});
+
 const CreateIntegrationSchema = z.object({
   app_secret: z.string().min(1),
   verify_token: z.string().min(1),
@@ -12,6 +45,7 @@ const CreateIntegrationSchema = z.object({
   access_token: z.string().min(1),
   graph_api_version: z.string().optional(),
   capi_trigger_stages: z.array(z.string().uuid()).optional(),
+  field_mappings: FieldMappingsSchema.optional(),
 });
 
 const UpdateIntegrationSchema = z.object({
@@ -22,6 +56,7 @@ const UpdateIntegrationSchema = z.object({
   graph_api_version: z.string().optional(),
   is_active: z.boolean().optional(),
   capi_trigger_stages: z.array(z.string().uuid()).optional(),
+  field_mappings: FieldMappingsSchema.optional(),
 });
 
 export async function getIntegration(
@@ -44,6 +79,7 @@ export async function getIntegration(
       graph_api_version: integration.graph_api_version,
       is_active: integration.is_active,
       capi_trigger_stages: integration.capi_trigger_stages,
+      field_mappings: integration.field_mappings,
       webhook_url: `/meta/webhook/${integration.id}`,
     },
   });
@@ -67,6 +103,7 @@ export async function createIntegration(
     access_token: body.access_token,
     graph_api_version: body.graph_api_version,
     capi_trigger_stages: body.capi_trigger_stages,
+    field_mappings: body.field_mappings,
   });
 
   return reply.status(201).send({
@@ -96,6 +133,7 @@ export async function updateIntegration(
     graph_api_version: body.graph_api_version,
     is_active: body.is_active,
     capi_trigger_stages: body.capi_trigger_stages,
+    field_mappings: body.field_mappings,
   });
 
   return reply.status(204).send();

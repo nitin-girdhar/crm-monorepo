@@ -22,6 +22,17 @@ body:json {
     "access_token": "updated-access-token",
     "graph_api_version": "v21.0",
     "is_active": true,
-    "capi_trigger_stages": []
+    "capi_trigger_stages": [],
+    "field_mappings": {
+      "contact": {
+        "phone": ["phone", "phone_number", "mobile_number"]
+      }
+    }
   }
+}
+
+docs {
+  All fields are optional — only the ones provided are updated (COALESCE
+  semantics server-side). See Update-Field-Mappings-Only.bru for an
+  example that updates field_mappings without touching credentials.
 }

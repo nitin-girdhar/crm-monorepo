@@ -1,5 +1,14 @@
 import { sql } from 'drizzle-orm';
 import { withServiceTx, withRoleTx, type RoleTxContext } from '@crm/db';
+import type { FieldMappingsConfig } from '../config/meta.config.js';
+
+// drizzle's sql`` template spreads JS arrays into comma-joined placeholders
+// (built for IN (...) clauses) — interpolating an empty array produces the
+// invalid literal `()` instead of an empty postgres array. Render as a
+// Postgres array-literal string instead so it binds as a single parameter.
+function toUuidArrayLiteral(ids: string[]): string {
+  return `{${ids.join(',')}}`;
+}
 
 export interface MetaIntegration {
   id: string;
@@ -11,13 +20,14 @@ export interface MetaIntegration {
   graph_api_version: string;
   is_active: boolean;
   capi_trigger_stages: string[];
+  field_mappings: FieldMappingsConfig | null;
 }
 
 export async function getIntegrationById(integrationId: string): Promise<MetaIntegration | null> {
   return withServiceTx(async (tx) => {
     const rows = await tx.execute(
       sql`SELECT id, org_id, app_secret, verify_token, pixel_id, access_token,
-                 graph_api_version, is_active, capi_trigger_stages
+                 graph_api_version, is_active, capi_trigger_stages, field_mappings
           FROM ext.meta_org_config
           WHERE id = ${integrationId} AND is_active = true
           LIMIT 1`,
@@ -30,7 +40,7 @@ export async function getIntegrationByOrgId(orgId: string): Promise<MetaIntegrat
   return withServiceTx(async (tx) => {
     const rows = await tx.execute(
       sql`SELECT id, org_id, app_secret, verify_token, pixel_id, access_token,
-                 graph_api_version, is_active, capi_trigger_stages
+                 graph_api_version, is_active, capi_trigger_stages, field_mappings
           FROM ext.meta_org_config
           WHERE org_id = ${orgId}
           LIMIT 1`,
@@ -47,16 +57,18 @@ export interface CreateIntegrationInput {
   access_token: string;
   graph_api_version?: string | undefined;
   capi_trigger_stages?: string[] | undefined;
+  field_mappings?: FieldMappingsConfig | undefined;
 }
 
 export async function createIntegration(ctx: RoleTxContext, data: CreateIntegrationInput): Promise<{ id: string }> {
-  const stagesArray = data.capi_trigger_stages ?? [];
+  const stagesLiteral = toUuidArrayLiteral(data.capi_trigger_stages ?? []);
 
   return withRoleTx(ctx, async (tx) => {
     const rows = await tx.execute(
-      sql`INSERT INTO ext.meta_org_config (org_id, app_secret, verify_token, pixel_id, access_token, graph_api_version, capi_trigger_stages)
+      sql`INSERT INTO ext.meta_org_config (org_id, app_secret, verify_token, pixel_id, access_token, graph_api_version, capi_trigger_stages, field_mappings)
           VALUES (${data.org_id}::uuid, ${data.app_secret}, ${data.verify_token}, ${data.pixel_id}, ${data.access_token},
-                  ${data.graph_api_version ?? 'v21.0'}, ${stagesArray}::uuid[])
+                  ${data.graph_api_version ?? 'v21.0'}, ${stagesLiteral}::uuid[],
+                  ${data.field_mappings ? JSON.stringify(data.field_mappings) : null}::jsonb)
           RETURNING id`,
     );
     return (rows as unknown as Array<{ id: string }>)[0]!;
@@ -71,9 +83,12 @@ export interface UpdateIntegrationInput {
   graph_api_version?: string | undefined;
   is_active?: boolean | undefined;
   capi_trigger_stages?: string[] | undefined;
+  field_mappings?: FieldMappingsConfig | undefined;
 }
 
 export async function updateIntegration(ctx: RoleTxContext, data: UpdateIntegrationInput): Promise<void> {
+  const stagesLiteral = toUuidArrayLiteral(data.capi_trigger_stages ?? []);
+
   await withRoleTx<void>(ctx, async (tx) => {
     await tx.execute(
       sql`UPDATE ext.meta_org_config
@@ -85,8 +100,12 @@ export async function updateIntegration(ctx: RoleTxContext, data: UpdateIntegrat
               graph_api_version  = COALESCE(${data.graph_api_version ?? null},  graph_api_version),
               is_active          = COALESCE(${data.is_active ?? null},          is_active),
               capi_trigger_stages = CASE
-                WHEN ${data.capi_trigger_stages !== undefined} THEN ${data.capi_trigger_stages ?? []}::uuid[]
+                WHEN ${data.capi_trigger_stages !== undefined} THEN ${stagesLiteral}::uuid[]
                 ELSE capi_trigger_stages
+              END,
+              field_mappings = CASE
+                WHEN ${data.field_mappings !== undefined} THEN ${data.field_mappings ? JSON.stringify(data.field_mappings) : null}::jsonb
+                ELSE field_mappings
               END
           WHERE org_id = ${ctx.org_id}::uuid`,
     );

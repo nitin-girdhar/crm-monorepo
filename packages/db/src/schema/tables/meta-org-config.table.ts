@@ -1,4 +1,4 @@
-import { uuid, text, boolean, timestamp } from 'drizzle-orm/pg-core';
+import { uuid, text, boolean, timestamp, jsonb } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { extSchema } from '../pg-schemas';
 import { organizationsTable } from './organizations.table';
@@ -13,6 +13,8 @@ export const metaOrgConfigTable = extSchema.table('meta_org_config', {
   graphApiVersion:   text('graph_api_version').notNull().default('v21.0'),
   isActive:          boolean('is_active').notNull().default(true),
   capiTriggerStages: uuid('capi_trigger_stages').array().notNull().default(sql`'{}'`),
+  // Nullable; when absent the service falls back to DEFAULT_FIELD_MAPPINGS in meta.config.ts
+  fieldMappings:     jsonb('field_mappings'),
   createdAt:         timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:         timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });

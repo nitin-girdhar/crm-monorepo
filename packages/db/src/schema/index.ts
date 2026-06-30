@@ -34,6 +34,9 @@ export * from './tables/meta-org-config.table.js';
 export * from './tables/meta-leads.table.js';
 export * from './tables/meta-lead-custom-fields.table.js';
 export * from './tables/meta-capi-outbound-logs.table.js';
+export * from './tables/meta-lead-addresses.table.js';
+export * from './tables/meta-lead-professional.table.js';
+export * from './tables/meta-lead-demographics.table.js';
 
 export * from './views/dashboard-leads.view.js';
 export * from './views/lead-followup-timeline.view.js';
@@ -45,3 +48,4 @@ export * from './views/branch-lookup.view.js';
 export * from './views/campaign-lookup.view.js';
 export * from './views/rep-performance.view.js';
 export * from './views/tenant-campaign-summary.view.js';
+export * from './views/meta-leads-complete.view.js';

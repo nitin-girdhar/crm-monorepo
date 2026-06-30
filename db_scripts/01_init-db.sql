@@ -2780,6 +2780,10 @@ INSERT INTO public.schema_versions (version, description) VALUES
   ('1.2.0', 'Meta Conversion API: ext.meta_org_config, ext.meta_leads, ext.meta_lead_custom_fields, ext.meta_capi_outbound_logs')
 ON CONFLICT (version) DO NOTHING;
 
+INSERT INTO public.schema_versions (version, description) VALUES
+  ('1.3.0', 'Meta Conversion API: ext.meta_lead_addresses, ext.meta_lead_professional, ext.meta_lead_demographics, ext.meta_org_config.field_mappings, extended ext.view_meta_leads_complete')
+ON CONFLICT (version) DO NOTHING;
+
 -- ── META_ORG_INTEGRATIONS: per-org Meta credentials + CAPI config ─
 CREATE TABLE IF NOT EXISTS ext.meta_org_config (
   id                 UUID        PRIMARY KEY DEFAULT public.gen_uuidv7(),
@@ -2948,7 +2952,123 @@ CREATE POLICY tenant_isolation_policy ON ext.meta_capi_outbound_logs
     WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
   ));
 
--- ── VIEW: complete meta leads joined to crm.marketing_leads ───────────
+-- ── META_LEAD_ADDRESSES: address fields from Meta lead forms (1:1) ────
+CREATE TABLE IF NOT EXISTS ext.meta_lead_addresses (
+  meta_lead_id    UUID        PRIMARY KEY REFERENCES ext.meta_leads(id) ON DELETE CASCADE,
+  org_id          UUID        NOT NULL REFERENCES entity.organizations(id),
+  street_address  TEXT,
+  city            TEXT,
+  state           TEXT,
+  province        TEXT,
+  country         TEXT,
+  postal_code     TEXT,
+  zip_code        TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_meta_lead_addresses_org ON ext.meta_lead_addresses (org_id);
+
+ALTER TABLE ext.meta_lead_addresses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ext.meta_lead_addresses FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS org_isolation_policy    ON ext.meta_lead_addresses;
+DROP POLICY IF EXISTS tenant_isolation_policy ON ext.meta_lead_addresses;
+
+CREATE POLICY org_isolation_policy ON ext.meta_lead_addresses
+  FOR ALL TO app_user
+  USING  (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid)
+  WITH CHECK (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
+
+CREATE POLICY tenant_isolation_policy ON ext.meta_lead_addresses
+  AS PERMISSIVE FOR ALL TO tenant_admin
+  USING (org_id IN (
+    SELECT id FROM entity.organizations
+    WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+  ))
+  WITH CHECK (org_id IN (
+    SELECT id FROM entity.organizations
+    WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+  ));
+
+-- ── META_LEAD_PROFESSIONAL: job/company fields from Meta lead forms (1:1) ─
+CREATE TABLE IF NOT EXISTS ext.meta_lead_professional (
+  meta_lead_id      UUID        PRIMARY KEY REFERENCES ext.meta_leads(id) ON DELETE CASCADE,
+  org_id            UUID        NOT NULL REFERENCES entity.organizations(id),
+  job_title         TEXT,
+  company_name      TEXT,
+  work_email        TEXT,
+  work_phone_number TEXT,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_meta_lead_professional_org ON ext.meta_lead_professional (org_id);
+
+ALTER TABLE ext.meta_lead_professional ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ext.meta_lead_professional FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS org_isolation_policy    ON ext.meta_lead_professional;
+DROP POLICY IF EXISTS tenant_isolation_policy ON ext.meta_lead_professional;
+
+CREATE POLICY org_isolation_policy ON ext.meta_lead_professional
+  FOR ALL TO app_user
+  USING  (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid)
+  WITH CHECK (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
+
+CREATE POLICY tenant_isolation_policy ON ext.meta_lead_professional
+  AS PERMISSIVE FOR ALL TO tenant_admin
+  USING (org_id IN (
+    SELECT id FROM entity.organizations
+    WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+  ))
+  WITH CHECK (org_id IN (
+    SELECT id FROM entity.organizations
+    WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+  ));
+
+-- ── META_LEAD_DEMOGRAPHICS: demographic fields from Meta lead forms (1:1) ─
+CREATE TABLE IF NOT EXISTS ext.meta_lead_demographics (
+  meta_lead_id         UUID        PRIMARY KEY REFERENCES ext.meta_leads(id) ON DELETE CASCADE,
+  org_id               UUID        NOT NULL REFERENCES entity.organizations(id),
+  date_of_birth        DATE,
+  gender               TEXT,
+  marital_status       TEXT,
+  relationship_status  TEXT,
+  military_status      TEXT,
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_meta_lead_demographics_org ON ext.meta_lead_demographics (org_id);
+
+ALTER TABLE ext.meta_lead_demographics ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ext.meta_lead_demographics FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS org_isolation_policy    ON ext.meta_lead_demographics;
+DROP POLICY IF EXISTS tenant_isolation_policy ON ext.meta_lead_demographics;
+
+CREATE POLICY org_isolation_policy ON ext.meta_lead_demographics
+  FOR ALL TO app_user
+  USING  (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid)
+  WITH CHECK (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
+
+CREATE POLICY tenant_isolation_policy ON ext.meta_lead_demographics
+  AS PERMISSIVE FOR ALL TO tenant_admin
+  USING (org_id IN (
+    SELECT id FROM entity.organizations
+    WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+  ))
+  WITH CHECK (org_id IN (
+    SELECT id FROM entity.organizations
+    WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+  ));
+
+-- ── META_ORG_CONFIG: per-org runtime-reloadable field mappings ───────
+-- Nullable JSONB; when NULL the service falls back to the hardcoded
+-- DEFAULT_FIELD_MAPPINGS in meta.config.ts. Lets an org remap Meta form
+-- field keys (e.g. a localized form using 'telefono' instead of 'phone')
+-- without a redeploy.
+ALTER TABLE ext.meta_org_config ADD COLUMN IF NOT EXISTS field_mappings JSONB;
+
+-- ── VIEW: complete meta leads joined to crm.marketing_leads + address/professional/demographics ─
 CREATE OR REPLACE VIEW ext.view_meta_leads_complete
   WITH (security_invoker = true)
 AS
@@ -2961,21 +3081,35 @@ AS
          ml.raw_field_data,
          mk.first_name, mk.last_name, mk.phone AS crm_phone, mk.email AS crm_email,
          mk.stage_id, mk.outcome_id, mk.assigned_user_id, mk.campaign_id AS crm_campaign_id,
-         mk.created_at AS crm_created_at
+         mk.created_at AS crm_created_at,
+         addr.street_address, addr.city, addr.state, addr.province,
+         addr.country, addr.postal_code, addr.zip_code,
+         prof.job_title, prof.company_name, prof.work_email, prof.work_phone_number,
+         demo.date_of_birth, demo.gender, demo.marital_status,
+         demo.relationship_status, demo.military_status
   FROM ext.meta_leads ml
-  LEFT JOIN crm.marketing_leads mk ON ml.marketing_lead_id = mk.id;
+  LEFT JOIN crm.marketing_leads mk         ON ml.marketing_lead_id = mk.id
+  LEFT JOIN ext.meta_lead_addresses addr   ON addr.meta_lead_id = ml.id
+  LEFT JOIN ext.meta_lead_professional prof ON prof.meta_lead_id = ml.id
+  LEFT JOIN ext.meta_lead_demographics demo ON demo.meta_lead_id = ml.id;
 
 -- ── Grants for Meta tables ────────────────────────────────────────
 GRANT SELECT, INSERT, UPDATE ON ext.meta_org_config    TO app_user;
 GRANT SELECT, INSERT, UPDATE ON ext.meta_leads               TO app_user;
 GRANT SELECT, INSERT         ON ext.meta_lead_custom_fields   TO app_user;
 GRANT SELECT, INSERT         ON ext.meta_capi_outbound_logs   TO app_user;
+GRANT SELECT, INSERT         ON ext.meta_lead_addresses       TO app_user;
+GRANT SELECT, INSERT         ON ext.meta_lead_professional    TO app_user;
+GRANT SELECT, INSERT         ON ext.meta_lead_demographics    TO app_user;
 GRANT SELECT                 ON ext.view_meta_leads_complete   TO app_user;
 
 GRANT ALL PRIVILEGES ON ext.meta_org_config    TO crm_service;
 GRANT ALL PRIVILEGES ON ext.meta_leads               TO crm_service;
 GRANT ALL PRIVILEGES ON ext.meta_lead_custom_fields  TO crm_service;
 GRANT ALL PRIVILEGES ON ext.meta_capi_outbound_logs  TO crm_service;
+GRANT ALL PRIVILEGES ON ext.meta_lead_addresses      TO crm_service;
+GRANT ALL PRIVILEGES ON ext.meta_lead_professional   TO crm_service;
+GRANT ALL PRIVILEGES ON ext.meta_lead_demographics   TO crm_service;
 GRANT SELECT         ON ext.view_meta_leads_complete  TO crm_service;
 
 -- ── meta_svc login role ───────────────────────────────────────────
