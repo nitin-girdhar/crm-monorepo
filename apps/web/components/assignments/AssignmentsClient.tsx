@@ -127,9 +127,9 @@ export default function AssignmentsClient({ actor, assignments, candidates, titl
                     {formatDate(a.assigned_at)}
                   </td>
                   <td className="px-4 py-2.5">
-                    {a.duplicate_lead_id ? (
+                    {a.superseded_by ? (
                       <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-200">
-                        Duplicate
+                        Superseded
                       </span>
                     ) : null}
                   </td>

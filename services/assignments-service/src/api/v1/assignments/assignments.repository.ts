@@ -210,7 +210,7 @@ export async function listAssignmentsFiltered(ctx: RoleTxContext, filters: Leads
         lso.label           AS lead_stage_outcome_label,
         ml.created_at       AS lead_created_at,
         ml.updated_at       AS assigned_at,
-        ml.duplicate_lead_id,
+        ml.is_active, ml.superseded_by,
         COUNT(*) OVER ()    AS total_count
       FROM crm.marketing_leads ml
       JOIN entity.organizations o   ON o.id  = ml.org_id

@@ -16,10 +16,6 @@ CREATE TABLE IF NOT EXISTS public.schema_versions (
   description TEXT,
   applied_at  TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP()
 );
-INSERT INTO public.schema_versions (version, description) VALUES
-  ('1.0.0', 'Merged monorepo + EXISTING_WORKING_CODE: geo tables, soft-delete, business-rule triggers, audit triggers, service logins'),
-  ('1.1.0', 'iam.user_org_mapping table, legal_entity_name/brand_name on entity.organizations, fixed multi-org RLS gaps')
-ON CONFLICT (version) DO NOTHING;
 
 -- ── Extensions ─────────────────────────────────────────────────────
 CREATE EXTENSION IF NOT EXISTS pgcrypto;   -- gen_random_bytes() used by public.gen_uuidv7()
@@ -134,55 +130,6 @@ CREATE TABLE IF NOT EXISTS geo.cities (
   CONSTRAINT uq_cities_state_name UNIQUE (state_id, name)
 );
 
--- ── Geographic seed data ────────────────────────────────────────────
-INSERT INTO geo.countries (name, iso_code) VALUES
-  ('India',                'IN'),
-  ('United States',        'US'),
-  ('United Kingdom',       'GB'),
-  ('United Arab Emirates', 'AE')
-ON CONFLICT (name) DO NOTHING;
-
-INSERT INTO geo.states (country_id, name, code)
-SELECT c.id, s.name, s.code
-FROM geo.countries c
-CROSS JOIN (VALUES
-  ('Delhi',           'DL'),
-  ('Maharashtra',     'MH'),
-  ('Karnataka',       'KA'),
-  ('Tamil Nadu',      'TN'),
-  ('West Bengal',     'WB'),
-  ('Telangana',       'TS'),
-  ('Rajasthan',       'RJ'),
-  ('Gujarat',         'GJ'),
-  ('Uttar Pradesh',   'UP'),
-  ('Haryana',         'HR'),
-  ('Punjab',          'PB'),
-  ('Madhya Pradesh',  'MP')
-) AS s(name, code)
-WHERE c.iso_code = 'IN'
-ON CONFLICT (country_id, name) DO NOTHING;
-
-INSERT INTO geo.cities (state_id, name)
-SELECT s.id, c.name
-FROM geo.states s
-CROSS JOIN (VALUES
-  ('Delhi',         'New Delhi'),
-  ('Delhi',         'Dwarka'),
-  ('Delhi',         'Rohini'),
-  ('Delhi',         'Lajpat Nagar'),
-  ('Delhi',         'Connaught Place'),
-  ('Delhi',         'Saket'),
-  ('Delhi',         'Janakpuri'),
-  ('Uttar Pradesh', 'Lucknow'),
-  ('Uttar Pradesh', 'Noida'),
-  ('Uttar Pradesh', 'Agra'),
-  ('Haryana',       'Gurgaon'),
-  ('Haryana',       'Faridabad'),
-  ('Punjab',        'Chandigarh'),
-  ('Punjab',        'Amritsar')
-) AS c(state_name, name)
-WHERE s.name = c.state_name
-ON CONFLICT (state_id, name) DO NOTHING;
 
 -- ===================================================================
 -- OPERATIONAL LOOKUP TABLES  (UUID PKs)
@@ -196,19 +143,6 @@ CREATE TABLE IF NOT EXISTS iam.user_roles (
   rank        INT      NOT NULL DEFAULT 0
                        CONSTRAINT chk_user_roles_rank CHECK (rank >= 0 AND rank <= 100)
 );
-INSERT INTO iam.user_roles (name, label, description, rank) VALUES
-  ('read_only',               'Read Only',              'Read-only viewer — dashboards and reports only',                                    0),
-  ('sales_representative',    'Sales Representative',   'Front-line sales — manages own assigned leads and follow-ups',                     20),
-  ('senior_sales_executive',  'Senior Sales Executive', 'Senior Sales Executive — manages a team of sales reps; reports to org_manager',    40),
-  ('org_manager',             'Manager',                'Manages a team of Senior Sales Executives and reps within an org',                 60),
-  ('org_sr_manager',          'Senior Manager',         'Manages a team of managers and reps within an org',                               70),
-  ('org_admin',               'Admin',                  'Org-level admin — full control within one org',                                   80),
-  ('tenant_admin',            'Tenant Admin',           'Tenant-level admin — manages all orgs under the tenant',                          90),
-  ('super_admin',             'Super Admin',            'Platform-level superuser — SaaS admin only',                                     100)
-ON CONFLICT (name) DO UPDATE SET
-  label       = EXCLUDED.label,
-  description = EXCLUDED.description,
-  rank        = EXCLUDED.rank;
 
 CREATE TABLE IF NOT EXISTS crm.lead_stage (
   id                UUID    PRIMARY KEY DEFAULT public.gen_uuidv7(),
@@ -220,20 +154,6 @@ CREATE TABLE IF NOT EXISTS crm.lead_stage (
   is_rejected       BOOLEAN NOT NULL DEFAULT FALSE,
   is_terminated     BOOLEAN NOT NULL DEFAULT FALSE
 );
-INSERT INTO crm.lead_stage (name, label, description, sort_order, followup_required, is_rejected, is_terminated) VALUES
-  ('new',            'New',            'Lead just received — not yet contacted',                       1, FALSE, FALSE, FALSE),
-  ('contacting',     'Contacting',     'Active outreach in progress — calls, WhatsApp, or email',      2, TRUE,  FALSE, FALSE),
-  ('qualified',      'Qualified',      'Lead confirmed as a genuine prospect with intent and budget',  3, TRUE,  FALSE, FALSE),
-  ('converted',      'Converted',      'Lead became a paying customer',                                4, FALSE, FALSE, TRUE),
-  ('unqualified',    'Unqualified',    'Lead did not qualify — outcome and note must be recorded',     5, FALSE, TRUE,  TRUE),
-  ('transferred_out','Transferred Out','Lead transferred to another org or partner',                   6, FALSE, FALSE, TRUE)
-ON CONFLICT (name) DO UPDATE SET
-  label             = EXCLUDED.label,
-  description       = EXCLUDED.description,
-  sort_order        = EXCLUDED.sort_order,
-  followup_required = EXCLUDED.followup_required,
-  is_rejected       = EXCLUDED.is_rejected,
-  is_terminated     = EXCLUDED.is_terminated;
 
 CREATE TABLE IF NOT EXISTS crm.lead_stage_outcome (
   id               UUID    PRIMARY KEY DEFAULT public.gen_uuidv7(),
@@ -246,74 +166,12 @@ CREATE TABLE IF NOT EXISTS crm.lead_stage_outcome (
   CONSTRAINT uq_lead_stage_outcome_stage_name UNIQUE (stage_id, name)
 );
 
--- Seed all outcomes using name subqueries (never hardcoded IDs)
-DO $$
-DECLARE
-  v_contacting  UUID;
-  v_qualified   UUID;
-  v_converted   UUID;
-  v_unqualified UUID;
-  v_transferred UUID;
-BEGIN
-  SELECT id INTO v_contacting  FROM crm.lead_stage WHERE name = 'contacting';
-  SELECT id INTO v_qualified   FROM crm.lead_stage WHERE name = 'qualified';
-  SELECT id INTO v_converted   FROM crm.lead_stage WHERE name = 'converted';
-  SELECT id INTO v_unqualified FROM crm.lead_stage WHERE name = 'unqualified';
-  SELECT id INTO v_transferred FROM crm.lead_stage WHERE name = 'transferred_out';
-
-  -- contacting outcomes
-  INSERT INTO crm.lead_stage_outcome (stage_id, name, label, sort_order) VALUES
-    (v_contacting, 'not_connected',   'Not Connected',   1),
-    (v_contacting, 'switch_off',      'Switch Off',      2),
-    (v_contacting, 'not_answered',    'Not Answered',    3),
-    (v_contacting, 'call_back_later', 'Call Back Later', 4)
-  ON CONFLICT (stage_id, name) DO NOTHING;
-
-  -- qualified outcomes
-  INSERT INTO crm.lead_stage_outcome (stage_id, name, label, sort_order) VALUES
-    (v_qualified, 'visit_scheduled', 'Visit Scheduled', 1),
-    (v_qualified, 'visited',         'Visited',         2)
-  ON CONFLICT (stage_id, name) DO NOTHING;
-
-  -- converted outcomes
-  INSERT INTO crm.lead_stage_outcome (stage_id, name, label, sort_order) VALUES
-    (v_converted, 'membership_sold', 'Membership Sold', 1)
-  ON CONFLICT (stage_id, name) DO NOTHING;
-
-  -- unqualified outcomes
-  INSERT INTO crm.lead_stage_outcome (stage_id, name, label, requires_comment, sort_order) VALUES
-    (v_unqualified, 'no_response_after_multiple_attempts', 'No Response After Multiple Attempts', FALSE, 1),
-    (v_unqualified, 'wrong_number',                        'Wrong Number',                        FALSE, 2),
-    (v_unqualified, 'job_applicant',                       'Job Applicant',                       FALSE, 3),
-    (v_unqualified, 'budget_issue',                        'Budget Issue',                        FALSE, 4),
-    (v_unqualified, 'not_interested',                      'Not Interested',                      FALSE, 5),
-    (v_unqualified, 'location_issue',                      'Location Issue',                      FALSE, 6),
-    (v_unqualified, 'duplicate_lead',                      'Duplicate Lead',                      FALSE, 7),
-    (v_unqualified, 'other',                               'Other',                               TRUE,  8)
-  ON CONFLICT (stage_id, name) DO NOTHING;
-
-  -- transferred_out outcomes
-  INSERT INTO crm.lead_stage_outcome (stage_id, name, label, sort_order) VALUES
-    (v_transferred, 'transferred_to_other_branch', 'Transferred to Other Branch', 1)
-  ON CONFLICT (stage_id, name) DO NOTHING;
-END;
-$$;
 
 CREATE TABLE IF NOT EXISTS crm.interaction_types (
   id          UUID PRIMARY KEY DEFAULT public.gen_uuidv7(),
   name        TEXT NOT NULL UNIQUE,
   description TEXT
 );
-INSERT INTO crm.interaction_types (name, description) VALUES
-  ('call',          'Outbound or inbound phone call'),
-  ('whatsapp',      'WhatsApp message (text, audio, or media)'),
-  ('email',         'Email sent or received'),
-  ('sms',           'SMS or text message'),
-  ('in_person',     'Face-to-face meeting at store, office, or event'),
-  ('video_call',    'Video call via Zoom, Google Meet, WhatsApp Video, etc.'),
-  ('chat',          'Live chat on website or social media platform'),
-  ('internal_note', 'Internal note or annotation added by a team member')
-ON CONFLICT (name) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS crm.follow_up_statuses (
   id          UUID PRIMARY KEY DEFAULT public.gen_uuidv7(),
@@ -321,99 +179,42 @@ CREATE TABLE IF NOT EXISTS crm.follow_up_statuses (
   label       TEXT NOT NULL,
   description TEXT
 );
-INSERT INTO crm.follow_up_statuses (name, label, description) VALUES
-  ('pending',     'Pending',     'Follow-up scheduled and not yet actioned'),
-  ('completed',   'Completed',   'Follow-up actioned within the scheduled window'),
-  ('missed',      'Missed',      'Follow-up was not actioned before the scheduled time'),
-  ('rescheduled', 'Rescheduled', 'Follow-up postponed to a new scheduled_at datetime')
-ON CONFLICT (name) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS marketing.marketing_platforms (
   id          UUID PRIMARY KEY DEFAULT public.gen_uuidv7(),
   name        TEXT NOT NULL UNIQUE,
   description TEXT
 );
-INSERT INTO marketing.marketing_platforms (name, description) VALUES
-  ('facebook',     'Facebook / Instagram Lead Ads and Campaigns'),
-  ('google',       'Google Ads (Search, Display, Shopping, Performance Max)'),
-  ('instagram',    'Instagram organic and paid posts'),
-  ('youtube',      'YouTube video ads'),
-  ('whatsapp',     'WhatsApp click-to-chat ads via Facebook Ads Manager'),
-  ('linkedin',     'LinkedIn Lead Gen Forms and sponsored content'),
-  ('tiktok',       'TikTok for Business lead generation'),
-  ('organic',      'Walk-in, direct website, or offline enquiry with no paid source'),
-  ('referral',     'Referred by an existing customer or partner'),
-  ('whatsapp_ads', 'WhatsApp click-to-chat ads via Facebook Ads Manager (legacy alias)')
-ON CONFLICT (name) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS marketing.campaign_statuses (
   id          UUID PRIMARY KEY DEFAULT public.gen_uuidv7(),
   name        TEXT NOT NULL UNIQUE,
   description TEXT
 );
-INSERT INTO marketing.campaign_statuses (name, description) VALUES
-  ('draft',     'Campaign created but not yet submitted for review or activation'),
-  ('active',    'Campaign is live and currently running'),
-  ('paused',    'Campaign temporarily paused; can be resumed'),
-  ('completed', 'Campaign ran its full duration and ended normally'),
-  ('archived',  'Campaign permanently closed and moved to archive')
-ON CONFLICT (name) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS entity.org_types (
   id          UUID PRIMARY KEY DEFAULT public.gen_uuidv7(),
   name        TEXT NOT NULL UNIQUE,
   description TEXT
 );
-INSERT INTO entity.org_types (name, description) VALUES
-  ('gym_location', 'Physical gym or fitness centre location'),
-  ('boutique',     'Boutique or small retail outlet'),
-  ('branch',       'Standard branch office of a business'),
-  ('headquarters', 'Corporate headquarters or registered office'),
-  ('franchise',    'Franchise outlet operating under a licensor brand'),
-  ('clinic',       'Medical or wellness clinic unit'),
-  ('warehouse',    'Storage or fulfilment centre'),
-  ('showroom',     'Product display and sales showroom'),
-  ('head_office',  'Corporate headquarters or registered office (alias)')
-ON CONFLICT (name) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS entity.tenant_domains (
   id          UUID PRIMARY KEY DEFAULT public.gen_uuidv7(),
   name        TEXT NOT NULL UNIQUE,
   description TEXT
 );
-INSERT INTO entity.tenant_domains (name, description) VALUES
-  ('fitness',     'Gyms, fitness centres, yoga studios, personal training'),
-  ('retail',      'Fashion boutiques, apparel, accessories, lifestyle stores'),
-  ('healthcare',  'Clinics, hospitals, diagnostic centres, healthcare providers'),
-  ('education',   'Schools, coaching centres, e-learning platforms'),
-  ('hospitality', 'Hotels, resorts, restaurants, event venues'),
-  ('medical',     'Medical practices and healthcare providers (alias for healthcare)'),
-  ('real_estate', 'Property sales, rentals, property management'),
-  ('automotive',  'Car dealerships, service centres, vehicle rentals'),
-  ('logistics',   'Warehousing, freight, courier, supply chain')
-ON CONFLICT (name) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS entity.tenant_plan_types (
   id          UUID PRIMARY KEY DEFAULT public.gen_uuidv7(),
   name        TEXT NOT NULL UNIQUE,
   description TEXT
 );
-INSERT INTO entity.tenant_plan_types (name, description) VALUES
-  ('free_trial', 'Up to 3 iam.users, 1 org, 100 leads — 30-day trial'),
-  ('starter',    'Up to 10 iam.users, 2 orgs, 1 000 leads/month'),
-  ('growth',     'Up to 50 iam.users, 10 orgs, 10 000 leads/month, AI scoring'),
-  ('enterprise', 'Unlimited iam.users and orgs, dedicated support, custom SLA')
-ON CONFLICT (name) DO NOTHING;
 
 -- Monorepo addition: source channel for organic / non-campaign leads
 CREATE TABLE IF NOT EXISTS crm.lead_sources (
   id   UUID PRIMARY KEY DEFAULT public.gen_uuidv7(),
   name TEXT NOT NULL UNIQUE
 );
-INSERT INTO crm.lead_sources (name) VALUES
-  ('facebook'),('google'),('instagram'),('whatsapp'),('website_form'),
-  ('referral'),('walk_in'),('cold_call'),('other')
-ON CONFLICT (name) DO NOTHING;
 
 -- ===================================================================
 -- CORE TABLES
@@ -725,7 +526,9 @@ CREATE TRIGGER trg_01_ad_campaigns_set_created_by
 -- ── MARKETING_LEADS ───────────────────────────────────────────────
 -- full_name is GENERATED ALWAYS AS STORED.
 -- city TEXT = free-text (monorepo); city_id/state_id/country_id = structured FK (EXISTING).
--- duplicate_lead_id: walk-in dedup pointer to the oldest digital lead with same phone/email.
+-- is_active: false when the record has been superseded or transferred out.
+-- superseded_by: old row → newer active row (same-org re-submission or walk-in dedup).
+--   All cross-org transfers and merge audit trail live in crm.lead_links.
 -- embedding column stub: uncomment after pgvector confirmed.
 CREATE TABLE IF NOT EXISTS crm.marketing_leads (
   id               UUID    PRIMARY KEY DEFAULT public.gen_uuidv7(),
@@ -760,8 +563,9 @@ CREATE TABLE IF NOT EXISTS crm.marketing_leads (
   branch_id        UUID    REFERENCES entity.branches(id),
   -- assignment
   assigned_user_id UUID    REFERENCES iam.users(id) ON DELETE SET NULL,
-  -- walk-in dedup
-  duplicate_lead_id UUID   REFERENCES crm.marketing_leads(id) ON DELETE SET NULL,
+  -- lead linking: dedup chain + transfer supersession
+  is_active        BOOLEAN NOT NULL DEFAULT TRUE,
+  superseded_by    UUID    REFERENCES crm.marketing_leads(id) ON DELETE SET NULL,
   -- raw/enrichment data
   raw_webhook_data JSONB   NOT NULL DEFAULT '{}',
   metadata         JSONB   NOT NULL DEFAULT '{}',
@@ -775,8 +579,10 @@ CREATE TABLE IF NOT EXISTS crm.marketing_leads (
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP()
 );
 
-COMMENT ON COLUMN crm.marketing_leads.duplicate_lead_id IS
-  'Set on walk-in leads when an existing campaign-sourced lead with the same phone/email exists. Points to the oldest matching digital lead in the same org.';
+COMMENT ON COLUMN crm.marketing_leads.is_active IS
+  'FALSE when this record has been superseded by a newer submission or transferred out. Filter WHERE is_active = TRUE for the live lead pipeline.';
+COMMENT ON COLUMN crm.marketing_leads.superseded_by IS
+  'Points forward to the newer active lead that replaced this one (same org). Set on both re-submission duplicates and walk-in dedup. Cross-org transfers are tracked in crm.lead_links.';
 
 DROP TRIGGER IF EXISTS trg_marketing_leads_updated_at     ON crm.marketing_leads;
 CREATE TRIGGER trg_marketing_leads_updated_at
@@ -793,6 +599,68 @@ CREATE TRIGGER trg_00_marketing_leads_set_org_id
 DROP TRIGGER IF EXISTS trg_01_marketing_leads_set_created_by ON crm.marketing_leads;
 CREATE TRIGGER trg_01_marketing_leads_set_created_by
   BEFORE INSERT ON crm.marketing_leads FOR EACH ROW EXECUTE FUNCTION public.set_created_by();
+
+-- migration: replace duplicate_lead_id with is_active + superseded_by
+ALTER TABLE crm.marketing_leads DROP COLUMN IF EXISTS duplicate_lead_id;
+ALTER TABLE crm.marketing_leads ADD COLUMN IF NOT EXISTS is_active     BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE crm.marketing_leads ADD COLUMN IF NOT EXISTS superseded_by UUID    REFERENCES crm.marketing_leads(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_marketing_leads_is_active    ON crm.marketing_leads (org_id, is_active) WHERE NOT is_deleted;
+CREATE INDEX IF NOT EXISTS idx_marketing_leads_superseded_by ON crm.marketing_leads (superseded_by)    WHERE superseded_by IS NOT NULL;
+
+-- ── LEAD_LINKS ────────────────────────────────────────────────────
+-- Audit trail for all lead-to-lead relationships:
+--   link_type = 'merge'    → same-org dedup (re-submission or walk-in), source_org_id = dest_org_id
+--   link_type = 'transfer' → executive cross-org transfer,             source_org_id ≠ dest_org_id
+-- dest_lead_id is nullable: set after the destination lead row is created.
+CREATE TABLE IF NOT EXISTS crm.lead_links (
+  id              UUID        PRIMARY KEY DEFAULT public.gen_uuidv7(),
+  -- source (the record being retired / transferred out)
+  source_lead_id  UUID        NOT NULL REFERENCES crm.marketing_leads(id) ON DELETE RESTRICT,
+  source_org_id   UUID        NOT NULL REFERENCES entity.organizations(id) ON DELETE RESTRICT,
+  -- destination (the active record going forward)
+  dest_lead_id    UUID        REFERENCES crm.marketing_leads(id) ON DELETE SET NULL,
+  dest_org_id     UUID        NOT NULL REFERENCES entity.organizations(id) ON DELETE RESTRICT,
+  -- discriminator
+  link_type       TEXT        NOT NULL CHECK (link_type IN ('merge', 'transfer')),
+  -- who & why
+  created_by      UUID        REFERENCES iam.users(id) ON DELETE SET NULL,
+  reason          TEXT,
+  notes           TEXT,
+  -- lifecycle of the link action itself
+  status          TEXT        NOT NULL DEFAULT 'completed' CHECK (status IN ('pending', 'completed', 'rejected')),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP()
+);
+
+DROP TRIGGER IF EXISTS trg_lead_links_updated_at ON crm.lead_links;
+CREATE TRIGGER trg_lead_links_updated_at
+  BEFORE UPDATE ON crm.lead_links FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+CREATE INDEX IF NOT EXISTS idx_lead_links_source_lead  ON crm.lead_links (source_lead_id);
+CREATE INDEX IF NOT EXISTS idx_lead_links_dest_lead    ON crm.lead_links (dest_lead_id) WHERE dest_lead_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_lead_links_source_org   ON crm.lead_links (source_org_id);
+CREATE INDEX IF NOT EXISTS idx_lead_links_dest_org     ON crm.lead_links (dest_org_id);
+
+-- RLS
+ALTER TABLE crm.lead_links ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS org_isolation_policy    ON crm.lead_links;
+DROP POLICY IF EXISTS tenant_isolation_policy ON crm.lead_links;
+
+-- both orgs involved in a link can see the record
+CREATE POLICY org_isolation_policy ON crm.lead_links
+  AS PERMISSIVE FOR ALL TO app_user
+  USING (source_org_id = current_setting('app.org_id')::uuid
+      OR dest_org_id   = current_setting('app.org_id')::uuid);
+
+CREATE POLICY tenant_isolation_policy ON crm.lead_links
+  AS PERMISSIVE FOR ALL TO tenant_admin
+  USING (source_org_id = current_setting('app.org_id')::uuid
+      OR dest_org_id   = current_setting('app.org_id')::uuid);
+
+GRANT SELECT, INSERT, UPDATE ON crm.lead_links TO app_user;
+GRANT ALL PRIVILEGES          ON crm.lead_links TO crm_service;
 
 -- ── LEAD_INTERACTIONS ─────────────────────────────────────────────
 -- Append-only log — no updated_at, no update trigger.
@@ -1327,6 +1195,8 @@ SELECT
   u.email              AS assigned_rep_email,
   ml.assigned_user_id,
   ml.campaign_id,
+  ml.is_active,
+  ml.superseded_by,
   ml.is_deleted,
   ml.created_at,
   ml.updated_at
@@ -2761,14 +2631,15 @@ BEGIN
 END; $$;
 
 -- Prevent duplicate active leads per org on phone and email.
--- Partial indexes: only enforced when the field is non-NULL and the lead is not soft-deleted.
+-- Partial indexes: enforced only for active, non-deleted rows.
+-- is_active = true ensures superseded rows can share the same phone/email.
 CREATE UNIQUE INDEX IF NOT EXISTS uix_marketing_leads_org_phone
   ON crm.marketing_leads (org_id, phone)
-  WHERE phone IS NOT NULL AND NOT is_deleted;
+  WHERE phone IS NOT NULL AND NOT is_deleted AND is_active = true;
 
 CREATE UNIQUE INDEX IF NOT EXISTS uix_marketing_leads_org_email
   ON crm.marketing_leads (org_id, email)
-  WHERE email IS NOT NULL AND NOT is_deleted;
+  WHERE email IS NOT NULL AND NOT is_deleted AND is_active = true;
 
 -- ===================================================================
 -- META CONVERSION API — Tables for bidirectional Meta Lead Ads integration
@@ -2776,13 +2647,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS uix_marketing_leads_org_email
 -- Outbound: CRM stage changes → Meta CAPI conversion events
 -- ===================================================================
 
-INSERT INTO public.schema_versions (version, description) VALUES
-  ('1.2.0', 'Meta Conversion API: ext.meta_org_config, ext.meta_leads, ext.meta_lead_custom_fields, ext.meta_capi_outbound_logs')
-ON CONFLICT (version) DO NOTHING;
-
-INSERT INTO public.schema_versions (version, description) VALUES
-  ('1.3.0', 'Meta Conversion API: ext.meta_lead_addresses, ext.meta_lead_professional, ext.meta_lead_demographics, ext.meta_org_config.field_mappings, extended ext.view_meta_leads_complete')
-ON CONFLICT (version) DO NOTHING;
 
 -- ── META_ORG_INTEGRATIONS: per-org Meta credentials + CAPI config ─
 CREATE TABLE IF NOT EXISTS ext.meta_org_config (

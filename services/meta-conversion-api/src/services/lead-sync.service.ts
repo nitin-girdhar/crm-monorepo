@@ -153,10 +153,35 @@ export async function syncLeadToDatabase(
     );
     const sourceId = (sourceResult as unknown as Array<{ id: string }>)[0]?.id;
 
-    // Insert into crm.marketing_leads
+    // Insert into crm.marketing_leads — always insert a new row (never upsert).
+    // If an active lead with the same phone already exists, mark the old row as superseded.
     const leadCreatedAt = lead.created_time
       ? new Date(lead.created_time * 1000)
       : new Date();
+
+    // Find existing active lead for this org+phone (if any)
+    const existingLeadResult = contact.phone
+      ? await tx.execute(
+          sql`SELECT id FROM crm.marketing_leads
+              WHERE org_id = ${orgId}::uuid
+                AND phone = ${contact.phone}
+                AND is_active = true
+                AND NOT is_deleted
+              LIMIT 1`,
+        )
+      : ([] as Array<{ id: string }>);
+    const existingLeadId = (existingLeadResult as unknown as Array<{ id: string }>)[0]?.id ?? null;
+
+    // Mark the old row inactive BEFORE inserting the new one — the unique index on
+    // (org_id, phone) WHERE is_active = true would fire if the old row is still active
+    // at INSERT time, because PostgreSQL checks constraints before the row is written.
+    if (existingLeadId) {
+      await tx.execute(
+        sql`UPDATE crm.marketing_leads
+            SET is_active = false, updated_at = NOW()
+            WHERE id = ${existingLeadId}::uuid`,
+      );
+    }
 
     const marketingLeadResult = await tx.execute(
       sql`INSERT INTO crm.marketing_leads (
@@ -174,15 +199,22 @@ export async function syncLeadToDatabase(
             ${JSON.stringify({ meta_lead_id: lead.id, form_id: lead.form_id, platform: 'facebook' })},
             ${leadCreatedAt.toISOString()}
           )
-          ON CONFLICT (org_id, phone) WHERE phone IS NOT NULL AND NOT is_deleted
-          DO UPDATE SET
-            email      = COALESCE(crm.marketing_leads.email, EXCLUDED.email),
-            first_name = COALESCE(NULLIF(crm.marketing_leads.first_name, ''), EXCLUDED.first_name),
-            last_name  = COALESCE(NULLIF(crm.marketing_leads.last_name,  ''), EXCLUDED.last_name),
-            updated_at = NOW()
           RETURNING id`,
     );
     const marketingLeadId = (marketingLeadResult as unknown as Array<{ id: string }>)[0]!.id;
+
+    // Now point the old row forward to the new one and write the audit record
+    if (existingLeadId) {
+      await tx.execute(
+        sql`UPDATE crm.marketing_leads
+            SET superseded_by = ${marketingLeadId}::uuid, updated_at = NOW()
+            WHERE id = ${existingLeadId}::uuid`,
+      );
+      await tx.execute(
+        sql`INSERT INTO crm.lead_links (source_lead_id, source_org_id, dest_lead_id, dest_org_id, link_type, status)
+            VALUES (${existingLeadId}::uuid, ${orgId}::uuid, ${marketingLeadId}::uuid, ${orgId}::uuid, 'merge', 'completed')`,
+      );
+    }
 
     // Insert into ext.meta_leads
     const metaLeadResult = await tx.execute(

@@ -13,3 +13,14 @@ get {
 headers {
   Cookie: auth_token={{authToken}}
 }
+
+docs {
+  Returns paginated assignments for the authenticated org.
+
+  Each row includes:
+    - is_active: boolean — false if the lead was superseded by a newer submission
+    - superseded_by: UUID | null — ID of the newer lead that replaced this one
+
+  A "Superseded" badge is shown in the UI when superseded_by is not null.
+  Cross-org transfers are tracked in crm.lead_links (link_type = 'transfer').
+}

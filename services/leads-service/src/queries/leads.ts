@@ -22,7 +22,7 @@ async function buildLeadsQuery(
 ) {
   const { page, page_size, use_multi_org } = filters;
   const offset = (page - 1) * page_size;
-  const conditions: string[] = ['NOT is_deleted'];
+  const conditions: string[] = ['NOT is_deleted', 'is_active = true'];
   const params: unknown[] = [];
 
   if (use_multi_org) {
@@ -127,7 +127,7 @@ export async function getLeadById(
               ml.phone, ml.email, ml.city, ml.address_line1, ml.address_line2, ml.pincode,
               ml.branch_id, ml.source_id, ml.campaign_id, ml.stage_id, ml.outcome_id,
               ml.outcome_comment, ml.assigned_user_id, ml.city_id, ml.state_id, ml.country_id,
-              ml.tags, ml.metadata, ml.duplicate_lead_id,
+              ml.tags, ml.metadata, ml.is_active, ml.superseded_by,
               ml.created_at, ml.updated_at, ml.created_by,
               ls.name         AS stage_name,
               ls.label        AS stage_label,

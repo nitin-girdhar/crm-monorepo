@@ -99,7 +99,7 @@ Three postgres.js pools exist, all with `transform: { column: { from: postgres.t
 
 ## Row Level Security
 
-RLS is enabled on `crm.marketing_leads`, `iam.users`, `marketing.ad_campaigns`, `crm.lead_interactions`, `crm.lead_follow_ups`, `crm.lead_assignment_log`, `crm.lead_status_log`, `ext.meta_org_config`, `ext.meta_leads`, `ext.meta_lead_custom_fields`, `ext.meta_capi_outbound_logs`, `ext.meta_lead_addresses`, `ext.meta_lead_professional`, and `ext.meta_lead_demographics`. Each table has:
+RLS is enabled on `crm.marketing_leads`, `crm.lead_links`, `iam.users`, `marketing.ad_campaigns`, `crm.lead_interactions`, `crm.lead_follow_ups`, `crm.lead_assignment_log`, `crm.lead_status_log`, `ext.meta_org_config`, `ext.meta_leads`, `ext.meta_lead_custom_fields`, `ext.meta_capi_outbound_logs`, `ext.meta_lead_addresses`, `ext.meta_lead_professional`, and `ext.meta_lead_demographics`. Each table has:
 
 - `org_isolation_policy` (TO app_user): restricts rows to `org_id = current_setting('app.current_org_id')::uuid`
 
@@ -126,7 +126,7 @@ Bidirectional integration with Meta (Facebook) Lead Ads:
 3. Meta-conversion-api looks up `ext.meta_org_config` by the integration ID to get per-org credentials
 4. HMAC-SHA256 verification using the org's `app_secret`
 5. Fetches full lead data from Meta Graph API using the org's `access_token`
-6. Creates a `crm.marketing_leads` row (source=facebook, stage=new) and a linked `ext.meta_leads` row
+6. Always inserts a new `crm.marketing_leads` row (source=facebook, stage=new). If an active lead with the same `(org_id, phone)` already exists, the old row is marked `is_active=false, superseded_by=<new_id>` and a `crm.lead_links` record (`link_type='merge'`) is written for audit. A linked `ext.meta_leads` row is created referencing the new marketing lead.
 7. Field extraction uses the org's `field_mappings` (from `ext.meta_org_config.field_mappings`, JSONB) merged over the hardcoded `DEFAULT_FIELD_MAPPINGS` — lets an org remap Meta form field keys without a redeploy
 8. Address/job/demographic fields are written to `ext.meta_lead_addresses`, `ext.meta_lead_professional`, `ext.meta_lead_demographics` (1:1, only when at least one field is present)
 9. Any remaining unmapped form fields stored in `ext.meta_lead_custom_fields`

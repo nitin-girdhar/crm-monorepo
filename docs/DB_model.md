@@ -67,8 +67,8 @@
 │  │          marketing_leads            │          │                      │                  │
 │  │  (core lead entity, soft-delete)    │          │                      │                  │
 │  │  FK → org, stage, outcome, campaign,│          │                      │                  │
-│  │       source, branch, assigned_user,│          │                      │                  │
-│  │       duplicate_lead (self-ref)     │          │                      │                  │
+│  │       source, branch, assigned_user │          │                      │                  │
+│  │  is_active, superseded_by (self-ref)│          │                      │                  │
 │  └────┬────────────────┬───────────┬───┘          │                      │                  │
 │       │                │           │               │                      │                  │
 │       │ 1:N            │ 1:N       │ 1:N           │                      │                  │
@@ -78,9 +78,12 @@
 │  │  _log      │ │ ment_log    │ │                     │  │                     │            │
 │  └────────────┘ └─────────────┘ └─────────────────────┘  └─────────────────────┘            │
 │                                                                                             │
-│  ┌──────────────┐                                                                           │
-│  │ lead_sources │  (facebook, google, walk_in, referral, ...)                               │
-│  └──────────────┘                                                                           │
+│  ┌──────────────┐  ┌──────────────────────────────────────────────────────────┐             │
+│  │ lead_sources │  │ lead_links  (merge: same-org dedup / transfer: cross-org) │             │
+│  │              │  │  source_lead_id → marketing_leads                         │             │
+│  └──────────────┘  │  dest_lead_id   → marketing_leads                         │             │
+│                    │  link_type: 'merge' | 'transfer'                           │             │
+│                    └──────────────────────────────────────────────────────────┘             │
 └─────────────────────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -545,7 +548,8 @@ Core lead entity. `full_name` is GENERATED STORED.
 | source_id         | UUID        | FK → crm.lead_sources(id)                    |
 | branch_id         | UUID        | FK → entity.branches(id)                     |
 | assigned_user_id  | UUID        | FK → iam.users(id)                           |
-| duplicate_lead_id | UUID        | FK → crm.marketing_leads(id), self-ref       |
+| is_active         | BOOLEAN     | NOT NULL, DEFAULT TRUE; FALSE when superseded or transferred out |
+| superseded_by     | UUID        | FK → crm.marketing_leads(id) self-ref; old row → newer active row |
 | raw_webhook_data  | JSONB       | NOT NULL, DEFAULT '{}'                       |
 | metadata          | JSONB       | NOT NULL, DEFAULT '{}'                       |
 | tags              | TEXT[]      | NOT NULL, DEFAULT '{}'                       |
@@ -556,9 +560,32 @@ Core lead entity. `full_name` is GENERATED STORED.
 | created_at        | TIMESTAMPTZ | NOT NULL, DEFAULT CLOCK_TIMESTAMP()          |
 | updated_at        | TIMESTAMPTZ | NOT NULL, DEFAULT CLOCK_TIMESTAMP()          |
 
-**Unique indexes (partial):** `(org_id, phone) WHERE phone IS NOT NULL AND NOT is_deleted`, `(org_id, email) WHERE email IS NOT NULL AND NOT is_deleted`  
+**Unique indexes (partial):** `(org_id, phone) WHERE phone IS NOT NULL AND NOT is_deleted AND is_active = true`, `(org_id, email) WHERE email IS NOT NULL AND NOT is_deleted AND is_active = true` — uniqueness enforced only among active leads; superseded rows may share the same phone/email  
 **RLS:** org-scoped for app_user; tenant-scoped for tenant_admin  
 **Triggers:** `set_updated_at`, `soft_delete_row`, `set_org_id`, `set_created_by`, `check_lead_stage_outcome`, `check_lead_fk_org_scope`, `log_lead_assignment`, `log_lead_stage_change`, `audit_marketing_leads_changes`
+
+---
+
+### crm.lead_links
+
+Audit trail for all lead-to-lead relationships. `link_type = 'merge'` covers same-org re-submission dedup and walk-in dedup (replaces the old `duplicate_lead_id`). `link_type = 'transfer'` covers executive cross-org transfers. Both orgs involved in a record can read it via RLS.
+
+| Column         | Type        | Notes                                                  |
+|----------------|-------------|--------------------------------------------------------|
+| id             | UUID        | PK, gen_uuidv7()                                       |
+| source_lead_id | UUID        | NOT NULL, FK → crm.marketing_leads(id)                 |
+| source_org_id  | UUID        | NOT NULL, FK → entity.organizations(id)                |
+| dest_lead_id   | UUID        | FK → crm.marketing_leads(id); nullable until dest created |
+| dest_org_id    | UUID        | NOT NULL, FK → entity.organizations(id)                |
+| link_type      | TEXT        | NOT NULL; `'merge'` or `'transfer'`                    |
+| created_by     | UUID        | FK → iam.users(id)                                     |
+| reason         | TEXT        |                                                        |
+| notes          | TEXT        |                                                        |
+| status         | TEXT        | NOT NULL, DEFAULT `'completed'`; `'pending'`, `'completed'`, `'rejected'` |
+| created_at     | TIMESTAMPTZ | NOT NULL, DEFAULT CLOCK_TIMESTAMP()                    |
+| updated_at     | TIMESTAMPTZ | NOT NULL, DEFAULT CLOCK_TIMESTAMP()                    |
+
+**RLS:** both `source_org_id` and `dest_org_id` can SELECT — allows cross-org transfer visibility without exposing the other org's lead data.
 
 ---
 

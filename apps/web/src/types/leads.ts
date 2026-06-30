@@ -17,7 +17,8 @@ export interface AssignmentView {
   assigned_rep_email: string | null;
   assigned_rep_role: string | null;
   assigned_at: string;
-  duplicate_lead_id: string | null;
+  is_active: boolean;
+  superseded_by: string | null;
 }
 
 export interface StatsData {

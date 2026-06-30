@@ -20,6 +20,7 @@ export * from './tables/users.table.js';
 export * from './tables/branches.table.js';
 export * from './tables/ad-campaigns.table.js';
 export * from './tables/marketing-leads.table.js';
+export * from './tables/lead-links.table.js';
 export * from './tables/lead-interactions.table.js';
 export * from './tables/lead-follow-ups.table.js';
 export * from './tables/lead-assignment-log.table.js';

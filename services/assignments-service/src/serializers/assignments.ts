@@ -15,7 +15,7 @@ export function toAssignmentView(row: Record<string, unknown>): Record<string, u
     assigned_at:            row['assigned_at'] ? String(row['assigned_at']) : null,
     assigned_by:            null,
     notes:                  null,
-    duplicate_lead_id:      null,
-    duplicate_lead_platform: null,
+    is_active:              row['is_active'] !== undefined ? Boolean(row['is_active']) : true,
+    superseded_by:          row['superseded_by'] ? String(row['superseded_by']) : null,
   };
 }
