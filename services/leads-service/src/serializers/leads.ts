@@ -15,7 +15,6 @@ export interface LeadView {
   country_name: string | null;
   stage: string;
   stage_label: string;
-  branch: string | null;
   source: string | null;
   followup_required: boolean;
   is_rejected: boolean;
@@ -55,7 +54,6 @@ export function toLeadView(row: Record<string, unknown>): LeadView {
     country_name: row['country_name'] ? String(row['country_name']) : null,
     stage: String(row['stage'] ?? ''),
     stage_label: String(row['stage_label'] ?? ''),
-    branch: row['branch'] ? String(row['branch']) : null,
     source: row['source'] ? String(row['source']) : null,
     followup_required: Boolean(row['followup_required']),
     is_rejected: Boolean(row['is_rejected']),

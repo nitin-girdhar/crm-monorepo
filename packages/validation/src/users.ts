@@ -32,6 +32,14 @@ export const resetPasswordSchema = z.object({
     .optional(),
 });
 
+export const updateAssignmentWeightsSchema = z.object({
+  weights: z.array(z.object({
+    user_id: z.string().uuid(),
+    weight: z.number().int().min(0).max(100),
+  })).min(1),
+});
+
 export type CreateUserInput = z.infer<typeof createUserSchema>;
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+export type UpdateAssignmentWeightsInput = z.infer<typeof updateAssignmentWeightsSchema>;

@@ -29,7 +29,7 @@ html, body { min-height: 100%; }
 }
 
 /* Prevent iOS Safari from rubber-banding the body horizontally when an
-   overflowing child (e.g. the branch-tab strip) needs to scroll. */
+   overflowing child (e.g. the org-tab strip) needs to scroll. */
 body { overflow-x: hidden; }
 
 /* ── AG Grid wrapper ─────────────────────────────────────────────────────────
@@ -79,7 +79,7 @@ body { overflow-x: hidden; }
 }
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 
-/* Branch tab strip */
+/* Org tab strip */
 .tabs-scrollbar {
   overflow-x: scroll;
   scrollbar-gutter: stable;

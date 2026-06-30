@@ -19,7 +19,6 @@ export function assignmentToLeadView(a: AssignmentView): LeadView {
     country_name: null,
     stage: a.lead_stage ?? '',
     stage_label: a.lead_stage_label ?? a.lead_stage ?? '',
-    branch: a.branch,
     source: null,
     followup_required: false,
     is_rejected: false,

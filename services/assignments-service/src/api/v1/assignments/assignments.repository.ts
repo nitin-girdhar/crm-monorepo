@@ -138,7 +138,7 @@ export async function unassignLead(ctx: RoleTxContext, leadId: string) {
       UPDATE crm.marketing_leads
       SET assigned_user_id = NULL
       WHERE id = ${leadId}::uuid AND NOT is_deleted
-      RETURNING id
+      RETURNING id, org_id
     `)) as Array<Record<string, unknown>>;
     return rows[0] ?? null;
   });

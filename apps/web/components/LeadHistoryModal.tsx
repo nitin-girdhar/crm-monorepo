@@ -757,7 +757,7 @@ export function LeadHistoryModal({ lead: leadProp, statusLabelMap = {}, onClose 
               <InfoRow label="Date" value={lead.created_at ? new Date(lead.created_at).toLocaleDateString("en-IN") : "—"} />
               <InfoRow label="Lead Source" value={lead.source ?? lead.platform ?? "—"} />
               <InfoRow label="Assigned To" value={lead.assigned_rep_name ?? "—"} />
-              <InfoRow label="Branch" value={lead.branch ?? lead.org_name ?? "—"} />
+              <InfoRow label="Org" value={lead.org_name ?? "—"} />
               <InfoRow label="Campaign" value={lead.campaign_name ?? "—"} full />
             </div>
           </div>

@@ -66,7 +66,6 @@ export interface LeadView {
   country_name: string | null;
   stage: string;
   stage_label: string;
-  branch: string | null;
   source: string | null;
   followup_required: boolean;
   is_rejected: boolean;

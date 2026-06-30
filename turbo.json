@@ -5,7 +5,8 @@
     "build": {
       "dependsOn": ["^build"],
       "inputs": ["src/**", "tsconfig.json", "package.json"],
-      "outputs": ["dist/**", ".next/**"]
+      "outputs": ["dist/**", ".next/**"],
+      "env": ["NEXT_PUBLIC_API_URL", "API_GATEWAY_INTERNAL_URL"]
     },
     "dev": {
       "dependsOn": ["^build"],

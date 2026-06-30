@@ -23,6 +23,7 @@
     "clean": "rimraf dist"
   },
   "dependencies": {
+    "@crm/permissions": "workspace:*",
     "drizzle-orm": "^0.44.0",
     "postgres": "^3.4.4"
   },

@@ -4,3 +4,4 @@ export * from './errors.js';
 export * from './drizzle.js';
 export * from './blocklist.js';
 export * from './notify.js';
+export * from './assignment.js';

@@ -9,7 +9,7 @@ export interface LocationFilter {
   countryIds?: number[];
 }
 
-export async function getBranches(ctx: RoleTxContext, filter: LocationFilter) {
+export async function getOrgs(ctx: RoleTxContext, filter: LocationFilter) {
   const isTenantWide = ctx.role === 'tenant_admin' || ctx.role === 'super_admin';
   return withRoleTx(ctx, async (tx) => {
     const scopeClause = isTenantWide
@@ -38,7 +38,7 @@ export async function getBranches(ctx: RoleTxContext, filter: LocationFilter) {
   });
 }
 
-export async function getAllBranches(ctx: RoleTxContext) {
+export async function getAllOrgs(ctx: RoleTxContext) {
   return withRoleTx(ctx, async (tx) => {
     return tx
       .select({

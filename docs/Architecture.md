@@ -56,7 +56,7 @@ Meta (Facebook) ─→ API Gateway /meta/webhook/:integrationId ─→ meta-conv
 | GET/PATCH/DELETE | `/users/:id` | users |
 | GET | `/users/assignable`, `/users/team`, `/users/org-chart` | users |
 | POST | `/users/:id/reset-password` | users |
-| GET | `/branches`, `/branches/all`, `/lead-sources` | users |
+| GET | `/orgs`, `/orgs/all`, `/lead-sources` | users |
 | GET/POST | `/assignments` | assignments |
 | GET | `/assignments/mine` | assignments |
 | GET/PATCH/DELETE | `/assignments/:id` | assignments |
@@ -111,6 +111,21 @@ Some tables also have:
 ## Assignment model
 
 Assignments are **not** a separate table. The assignment is stored as `crm.marketing_leads.assigned_user_id`. The assignments-service queries and updates `crm.marketing_leads` directly. Assignment ID in API responses = Lead ID.
+
+### Weighted auto-assignment
+
+When a new lead is created without an explicit `assigned_user_id` (Meta sync, manual lead creation), `resolveAutoAssignedUser(tx, orgId)` in `@crm/db` (`packages/db/src/assignment.ts`) picks who receives it. Applies uniformly across every lead-creation path — both `services/meta-conversion-api/.../lead-sync.service.ts` and `services/leads-service/.../leads.repository.ts createLead()` call it.
+
+**Eligibility:** active `iam.user_org_mapping` row for the org, `lead_assignment_weight > 0`, and role rank strictly between `READ_ONLY` and `ADMIN` (org admins and read-only users are never auto-assigned leads).
+
+**Algorithm — deficit-based weighted round-robin:**
+1. Count each eligible user's current *open* workload: leads assigned to them in this org where the lead's stage has `is_terminated = false` (no hardcoded stage names — picks up `new`/`contacting`/`on_hold`/`qualified`, and any future non-terminal stage, automatically)
+2. `deficit = (weight / 100 * total_open_including_new_lead) - current_open_count`
+3. Assign to whichever eligible user has the highest deficit; ties broken randomly
+
+This deterministically converges to each user's target %, self-corrects as leads resolve (convert/reject/transfer), and is not retroactive — changing weights only affects future unassigned leads. If no users in the org have a weight set, `resolveAutoAssignedUser` returns `null` and the lead stays unassigned (today's default behavior, unchanged).
+
+**Managing weights:** `GET/PUT /users/assignment-weights` (users-service, org-admin rank required for PUT). The PUT endpoint validates every `user_id` is actually eligible and that weights sum to exactly 100 (or all 0, disabling auto-assignment for the org) — both checked at the application layer inside the same transaction as the write, not via a DB constraint.
 
 ## Activity logging
 

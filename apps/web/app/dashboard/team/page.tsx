@@ -13,7 +13,7 @@ export default async function TeamPage() {
   return (
     <Placeholder
       title="Team"
-      body="Members of your branch and their current pipeline load."
+      body="Members of your org and their current pipeline load."
     />
   );
 }

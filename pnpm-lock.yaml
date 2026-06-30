@@ -93,6 +93,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@crm/permissions':
+        specifier: workspace:*
+        version: link:../permissions
       drizzle-orm:
         specifier: ^0.44.0
         version: 0.44.7(postgres@3.4.9)

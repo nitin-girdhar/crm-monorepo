@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { branches as branchesApi } from '@/src/lib/api/client';
+import { orgs as orgsApi } from '@/src/lib/api/client';
 
-export interface DynamicBranch {
+export interface DynamicOrg {
   id: string;
   name: string;
   cityId: number | null;
@@ -17,21 +17,21 @@ export interface LocationFilter {
   countryIds?: number[];
 }
 
-interface UseBranchesReturn {
-  branches: DynamicBranch[];
+interface UseOrgsReturn {
+  orgs: DynamicOrg[];
   loading: boolean;
   error: string | null;
   refresh: () => void;
 }
 
-export function useBranches(locationFilter?: LocationFilter): UseBranchesReturn {
-  const [branches, setBranches] = useState<DynamicBranch[]>([]);
+export function useOrgs(locationFilter?: LocationFilter): UseOrgsReturn {
+  const [orgs, setOrgs] = useState<DynamicOrg[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const filterRef = useRef(locationFilter);
   filterRef.current = locationFilter;
 
-  const fetchBranches = useCallback(async () => {
+  const fetchOrgs = useCallback(async () => {
     setLoading(true);
     try {
       const f = filterRef.current;
@@ -40,10 +40,10 @@ export function useBranches(locationFilter?: LocationFilter): UseBranchesReturn 
       if (f?.stateIds?.length)   params.stateIds   = f.stateIds.join(',');
       if (f?.countryIds?.length) params.countryIds  = f.countryIds.join(',');
 
-      const json = await branchesApi.list(params);
+      const json = await orgsApi.list(params);
       const raw = json.data ?? [];
 
-      setBranches(
+      setOrgs(
         raw.map((o) => ({
           id: o.id,
           name: o.name,
@@ -62,10 +62,10 @@ export function useBranches(locationFilter?: LocationFilter): UseBranchesReturn 
 
   const filterKey = JSON.stringify(locationFilter);
   useEffect(() => {
-    setBranches([]);
-    fetchBranches();
+    setOrgs([]);
+    fetchOrgs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterKey, fetchBranches]);
+  }, [filterKey, fetchOrgs]);
 
-  return { branches, loading, error, refresh: fetchBranches };
+  return { orgs, loading, error, refresh: fetchOrgs };
 }

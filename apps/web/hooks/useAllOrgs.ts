@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { branches as branchesApi } from '@/src/lib/api/client';
+import { orgs as orgsApi } from '@/src/lib/api/client';
 
-export function useAllBranches() {
-  const [branches, setBranches] = useState<string[]>([]);
+export function useAllOrgs() {
+  const [orgs, setOrgs] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -12,18 +12,18 @@ export function useAllBranches() {
     let cancelled = false;
     (async () => {
       try {
-        const json = await branchesApi.all();
+        const json = await orgsApi.all();
         if (cancelled) return;
         const list = Array.isArray(json.data) ? json.data : [];
-        setBranches(
-          list.map((b) =>
-            typeof b === 'string' ? b : (b as Record<string, unknown>).name as string ?? '',
+        setOrgs(
+          list.map((o) =>
+            typeof o === 'string' ? o : (o as Record<string, unknown>).name as string ?? '',
           ).filter(Boolean),
         );
         setError(null);
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : 'Failed to load branches');
+        setError(err instanceof Error ? err.message : 'Failed to load orgs');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -31,5 +31,5 @@ export function useAllBranches() {
     return () => { cancelled = true; };
   }, []);
 
-  return { branches, loading, error };
+  return { orgs, loading, error };
 }

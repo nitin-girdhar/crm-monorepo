@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { authenticate } from '../../../middleware/auth.middleware.js';
 import { validate } from '../../../middleware/validate.middleware.js';
-import { createUserSchema, updateUserSchema, resetPasswordSchema } from '@crm/validation';
+import { createUserSchema, updateUserSchema, resetPasswordSchema, updateAssignmentWeightsSchema } from '@crm/validation';
 import { listUsersQuerySchema } from './users.schema.js';
 import { UsersController } from './users.controller.js';
 
@@ -10,6 +10,8 @@ export async function usersRouter(app: FastifyInstance) {
 
   app.get('/users',            { preHandler: [authenticate, validate({ query: listUsersQuerySchema })] }, ctrl.list);
   app.get('/users/assignable', { preHandler: [authenticate] }, ctrl.getAssignable);
+  app.get('/users/assignment-weights', { preHandler: [authenticate] }, ctrl.getAssignmentWeights);
+  app.put('/users/assignment-weights', { preHandler: [authenticate, validate({ body: updateAssignmentWeightsSchema })] }, ctrl.updateAssignmentWeights);
   app.get('/users/team',       { preHandler: [authenticate] }, ctrl.getTeam);
   app.get('/users/org-chart',  { preHandler: [authenticate] }, ctrl.getOrgChart);
   app.get('/users/:id',        { preHandler: [authenticate] }, ctrl.getById);

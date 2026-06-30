@@ -253,12 +253,12 @@ app.delete('/assignments/:id', { ...withAuth }, async (req, reply) => {
   return proxyTo(config.assignmentsServiceUrl, `/api/v1/assignments/${id}`, req, reply, req.userCtx);
 });
 
-// Branches & locations (users-service)
-app.get('/branches', { ...withAuth }, async (req, reply) => {
-  return proxyTo(config.usersServiceUrl, '/api/v1/branches', req, reply, req.userCtx);
+// Orgs & locations (users-service)
+app.get('/orgs', { ...withAuth }, async (req, reply) => {
+  return proxyTo(config.usersServiceUrl, '/api/v1/orgs', req, reply, req.userCtx);
 });
-app.get('/branches/all', { ...withAuth }, async (req, reply) => {
-  return proxyTo(config.usersServiceUrl, '/api/v1/branches/all', req, reply, req.userCtx);
+app.get('/orgs/all', { ...withAuth }, async (req, reply) => {
+  return proxyTo(config.usersServiceUrl, '/api/v1/orgs/all', req, reply, req.userCtx);
 });
 app.get('/locations', { ...withAuth }, async (req, reply) => {
   return proxyTo(config.leadsServiceUrl, '/api/v1/locations', req, reply, req.userCtx);

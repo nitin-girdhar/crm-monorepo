@@ -232,9 +232,9 @@ export const campaigns = {
     request<void>(`/campaigns/${id}`, { method: 'DELETE' }),
 };
 
-// ── Branches ─────────────────────────────────────────────────────────────────
+// ── Orgs ─────────────────────────────────────────────────────────────────────
 
-export const branches = {
+export const orgs = {
   list: (params: { cityIds?: string; stateIds?: string; countryIds?: string } = {}) => {
     const qs = new URLSearchParams(
       Object.fromEntries(
@@ -243,10 +243,10 @@ export const branches = {
           .map(([k, v]) => [k, String(v)]),
       ),
     ).toString();
-    return request<{ success: true; data: Array<{ id: string; name: string; org_id: string; org_name?: string; city_id?: number | null; state_id?: number | null; country_id?: number | null; cityId?: number | null; stateId?: number | null; countryId?: number | null }> }>(`/branches${qs ? `?${qs}` : ''}`);
+    return request<{ success: true; data: Array<{ id: string; name: string; org_id: string; org_name?: string; city_id?: number | null; state_id?: number | null; country_id?: number | null; cityId?: number | null; stateId?: number | null; countryId?: number | null }> }>(`/orgs${qs ? `?${qs}` : ''}`);
   },
 
-  all: () => request<{ success: true; data: Array<{ id: string; name: string; org_id: string }> }>('/branches/all'),
+  all: () => request<{ success: true; data: Array<{ id: string; name: string; org_id: string }> }>('/orgs/all'),
 };
 
 // ── Lead Sources ─────────────────────────────────────────────────────────────

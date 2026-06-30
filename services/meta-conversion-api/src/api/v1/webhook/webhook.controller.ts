@@ -139,7 +139,7 @@ export async function handleWebhookPost(
             type: 'lead:created',
             lead_id: syncResult.marketingLeadId,
             org_id: integration.org_id,
-            tenant_id: '',
+            tenant_id: integration.tenant_id,
             assigned_user_id: null,
             actor_id: 'system',
             ts: Date.now(),

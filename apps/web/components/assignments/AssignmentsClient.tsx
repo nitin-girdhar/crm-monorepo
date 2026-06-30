@@ -1,8 +1,10 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { SessionUser } from '@crm/types';
 import type { AssignmentView } from '@/src/types/leads';
+import { useRealtimeEvents } from '@/hooks/useRealtimeEvents';
 import AssigneeBadge from './AssigneeBadge';
 import AssignLeadModal from './AssignLeadModal';
 import DownloadButton from '@/components/common/DownloadButton';
@@ -41,9 +43,16 @@ function formatDate(dateStr: string): string {
 }
 
 export default function AssignmentsClient({ actor, assignments, candidates, title = 'Assignments', subtitle, hideCreate }: Props) {
+  const router = useRouter();
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<AssignmentView | null>(null);
   const [search, setSearch] = useState('');
+
+  useRealtimeEvents(actor.id, {
+    onLeadCreated: () => router.refresh(),
+    onLeadUpdated: () => router.refresh(),
+    onLeadDeleted: () => router.refresh(),
+  });
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();

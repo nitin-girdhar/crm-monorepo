@@ -13,6 +13,7 @@ function toUuidArrayLiteral(ids: string[]): string {
 export interface MetaIntegration {
   id: string;
   org_id: string;
+  tenant_id: string;
   app_secret: string;
   verify_token: string;
   pixel_id: string;
@@ -26,10 +27,11 @@ export interface MetaIntegration {
 export async function getIntegrationById(integrationId: string): Promise<MetaIntegration | null> {
   return withServiceTx(async (tx) => {
     const rows = await tx.execute(
-      sql`SELECT id, org_id, app_secret, verify_token, pixel_id, access_token,
-                 graph_api_version, is_active, capi_trigger_stages, field_mappings
-          FROM ext.meta_org_config
-          WHERE id = ${integrationId} AND is_active = true
+      sql`SELECT c.id, c.org_id, o.tenant_id, c.app_secret, c.verify_token, c.pixel_id, c.access_token,
+                 c.graph_api_version, c.is_active, c.capi_trigger_stages, c.field_mappings
+          FROM ext.meta_org_config c
+          JOIN entity.organizations o ON o.id = c.org_id
+          WHERE c.id = ${integrationId} AND c.is_active = true
           LIMIT 1`,
     );
     return (rows as unknown as MetaIntegration[])[0] ?? null;
@@ -39,10 +41,11 @@ export async function getIntegrationById(integrationId: string): Promise<MetaInt
 export async function getIntegrationByOrgId(orgId: string): Promise<MetaIntegration | null> {
   return withServiceTx(async (tx) => {
     const rows = await tx.execute(
-      sql`SELECT id, org_id, app_secret, verify_token, pixel_id, access_token,
-                 graph_api_version, is_active, capi_trigger_stages, field_mappings
-          FROM ext.meta_org_config
-          WHERE org_id = ${orgId}
+      sql`SELECT c.id, c.org_id, o.tenant_id, c.app_secret, c.verify_token, c.pixel_id, c.access_token,
+                 c.graph_api_version, c.is_active, c.capi_trigger_stages, c.field_mappings
+          FROM ext.meta_org_config c
+          JOIN entity.organizations o ON o.id = c.org_id
+          WHERE c.org_id = ${orgId}
           LIMIT 1`,
     );
     return (rows as unknown as MetaIntegration[])[0] ?? null;

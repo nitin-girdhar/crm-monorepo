@@ -26,6 +26,18 @@ export async function getAssignableUsers(ctx: RoleTxContext, actorRank: number) 
   return repo.getAssignableUsers(ctx, actorRank);
 }
 
+export async function getAssignmentWeights(ctx: RoleTxContext) {
+  return repo.getAssignmentWeights(ctx);
+}
+
+export async function updateAssignmentWeights(
+  ctx: RoleTxContext,
+  weights: Array<{ user_id: string; weight: number }>,
+) {
+  await repo.updateAssignmentWeights(ctx, weights);
+  await logActivity({ action_type: 'assignment_weights_updated', performed_by: ctx.user_id });
+}
+
 export async function getTeamMembers(ctx: RoleTxContext) {
   return repo.getTeamMembers(ctx);
 }

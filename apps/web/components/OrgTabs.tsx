@@ -1,15 +1,15 @@
 'use client';
 
-import type { DynamicBranch } from '@/hooks/useBranches';
+import type { DynamicOrg } from '@/hooks/useOrgs';
 
 interface Props {
-  branches: DynamicBranch[];
+  orgs: DynamicOrg[];
   activeId: string;
   loading: boolean;
-  onChange: (branch: DynamicBranch) => void;
+  onChange: (org: DynamicOrg) => void;
 }
 
-export default function BranchTabs({ branches, activeId, loading, onChange }: Props) {
+export default function OrgTabs({ orgs, activeId, loading, onChange }: Props) {
   if (loading) {
     return (
       <div className="w-full border-b border-[#E2E8F0] bg-white px-4 sm:px-6 py-2">
@@ -29,12 +29,12 @@ export default function BranchTabs({ branches, activeId, loading, onChange }: Pr
         style={{ WebkitOverflowScrolling: 'touch', scrollBehavior: 'smooth' }}
       >
         <div className="flex min-w-max whitespace-nowrap px-4 sm:px-6">
-          {branches.map((branch) => {
-            const isActive = branch.id === activeId;
+          {orgs.map((org) => {
+            const isActive = org.id === activeId;
             return (
               <button
-                key={branch.id}
-                onClick={() => onChange(branch)}
+                key={org.id}
+                onClick={() => onChange(org)}
                 className={[
                   'flex-shrink-0 px-4 py-2.5 text-sm font-medium border-b-2 transition-all duration-150',
                   isActive
@@ -42,7 +42,7 @@ export default function BranchTabs({ branches, activeId, loading, onChange }: Pr
                     : 'border-transparent text-[#64748B] hover:text-[#0F172A] hover:border-[#CBD5E1]',
                 ].join(' ')}
               >
-                {branch.name}
+                {org.name}
               </button>
             );
           })}

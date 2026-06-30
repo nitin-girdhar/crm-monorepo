@@ -100,7 +100,7 @@ export default function UserMenu({ user }: Props) {
                 )}
                 {showOrg && (
                   <>
-                    <span className="whitespace-nowrap font-semibold text-[#94A3B8]">Branch</span>
+                    <span className="whitespace-nowrap font-semibold text-[#94A3B8]">Org</span>
                     <span className="truncate text-[#64748B]">{user.org_name}</span>
                   </>
                 )}

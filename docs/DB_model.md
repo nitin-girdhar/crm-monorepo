@@ -31,15 +31,9 @@
 │  ┌──────────────────────────────────────────────────────────┐     ┌──────────────┐           │
 │  │                    tenants                               │◄────│ organizations│──┐        │
 │  │  (id, name, domain_id, plan_type_id, is_active, ...)    │ 1:N │              │  │        │
-│  └──────────────────────────────────────────────────────────┘     └──────┬───────┘  │        │
-│                                                                         │          │        │
-│                                                                    1:N  │          │        │
-│                                                                  ┌──────▼───────┐  │        │
-│                                                                  │  branches    │  │        │
-│                                                                  └──────────────┘  │        │
-└─────────────────────────────────────────────────────────────────────────┼──────────┘        │
-                                                                         │                    │
-                    ┌────────────────────────────────────────────────────┘                    │
+└──┴──────────────────────────────────────────────────────────┴─────┴──────┬───────┴──┘        │
+                                                                           │                    │
+                    ┌──────────────────────────────────────────────────────┘                    │
                     │ (org_id FK on nearly all operational tables)                             │
                     ▼                                                                          │
 ┌─────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -67,7 +61,7 @@
 │  │          marketing_leads            │          │                      │                  │
 │  │  (core lead entity, soft-delete)    │          │                      │                  │
 │  │  FK → org, stage, outcome, campaign,│          │                      │                  │
-│  │       source, branch, assigned_user │          │                      │                  │
+│  │       source, assigned_user         │          │                      │                  │
 │  │  is_active, superseded_by (self-ref)│          │                      │                  │
 │  └────┬────────────────┬───────────┬───┘          │                      │                  │
 │       │                │           │               │                      │                  │
@@ -141,7 +135,7 @@
 | ----------- | ----------------------------------------------- |
 | `public`    | UUIDv7 generator, utility trigger functions      |
 | `geo`       | Geographic lookup tables (countries/states/cities) |
-| `entity`    | Tenant, organization, branch, and related lookups |
+| `entity`    | Tenant, organization, and related lookups          |
 | `iam`       | Users, roles, org mappings, token blocklist       |
 | `crm`       | Leads, interactions, follow-ups, stage pipeline   |
 | `marketing` | Ad campaigns, platforms, statuses                |
@@ -312,23 +306,6 @@ Business unit / location within a tenant.
 
 ---
 
-### entity.branches
-
-Physical branch within an organization.
-
-| Column     | Type        | Constraints                                  |
-| ---------- | ----------- | -------------------------------------------- |
-| id         | UUID        | PK (UUIDv7)                                  |
-| org_id     | UUID        | NOT NULL, FK → entity.organizations(id)      |
-| name       | TEXT        | NOT NULL                                     |
-| is_active  | BOOLEAN     | NOT NULL, DEFAULT TRUE                       |
-| created_at | TIMESTAMPTZ | NOT NULL, DEFAULT CLOCK_TIMESTAMP()          |
-
-**Unique:** `(org_id, name)`  
-**RLS:** app_user sees branches of mapped orgs; tenant_admin sees all within tenant
-
----
-
 ### iam.user_roles
 
 Role definitions with rank-based hierarchy.
@@ -400,6 +377,7 @@ Multi-org access control. Source of truth for which orgs a user can access.
 | org_id     | UUID        | NOT NULL, FK → entity.organizations(id), PK (composite) |
 | role_id    | UUID        | NOT NULL, FK → iam.user_roles(id)        |
 | is_active  | BOOLEAN     | NOT NULL, DEFAULT TRUE                   |
+| lead_assignment_weight | SMALLINT | NOT NULL, DEFAULT 0, CHECK 0-100; % share of new leads auto-routed to this user within this org. Sum across an org's rows must be 100 (or all 0 to disable), enforced at the application layer — see `PUT /users/assignment-weights` |
 | granted_by | UUID        | FK → iam.users(id)                       |
 | granted_at | TIMESTAMPTZ | NOT NULL, DEFAULT CLOCK_TIMESTAMP()      |
 | updated_at | TIMESTAMPTZ | NOT NULL, DEFAULT CLOCK_TIMESTAMP()      |
@@ -451,10 +429,13 @@ Pipeline stages for leads.
 | ---- | ---------------- | ----------------- | ----------- | ------------- |
 | 1    | new              | false             | false       | false         |
 | 2    | contacting       | true              | false       | false         |
-| 3    | qualified        | true              | false       | false         |
-| 4    | converted        | false             | false       | true          |
-| 5    | unqualified      | false             | true        | true          |
-| 6    | transferred_out  | false             | false       | true          |
+| 3    | on_hold          | true              | false       | false         |
+| 4    | qualified        | true              | false       | false         |
+| 5    | converted        | false             | false       | true          |
+| 6    | unqualified      | false             | true        | true          |
+| 7    | transferred_out  | false             | false       | true          |
+
+`is_terminated = false` is what the weighted auto-assignment deficit calculation uses to count a user's "open workload" (`new`/`contacting`/`on_hold`/`qualified`) — it never hardcodes stage names, so any future non-terminal stage is picked up automatically.
 
 ---
 
@@ -546,7 +527,6 @@ Core lead entity. `full_name` is GENERATED STORED.
 | outcome_comment   | TEXT        |                                              |
 | campaign_id       | UUID        | FK → marketing.ad_campaigns(id)              |
 | source_id         | UUID        | FK → crm.lead_sources(id)                    |
-| branch_id         | UUID        | FK → entity.branches(id)                     |
 | assigned_user_id  | UUID        | FK → iam.users(id)                           |
 | is_active         | BOOLEAN     | NOT NULL, DEFAULT TRUE; FALSE when superseded or transferred out |
 | superseded_by     | UUID        | FK → crm.marketing_leads(id) self-ref; old row → newer active row |
@@ -969,7 +949,6 @@ Schema migration tracking.
 | `iam.vw_user_org_chart`                      | iam       | yes              | Recursive org chart with depth + breadcrumb path           |
 | `iam.vw_user_team_members`                   | iam       | yes              | Recursive subtree membership for hierarchy authority       |
 | `iam.vw_user_org_access`                     | iam       | yes              | Active org-user mappings with role context                 |
-| `entity.vw_branch_lookup`                    | entity    | yes              | Branches with org and tenant context                       |
 | `marketing.vw_campaign_lookup`               | marketing | yes              | Campaigns with resolved platform/status                    |
 | `marketing.vw_tenant_campaign_summary`       | marketing | yes              | Campaign performance by tenant                             |
 | `ext.view_meta_leads_complete`               | ext       | yes              | Meta leads joined to CRM marketing_leads, address, professional, demographics |

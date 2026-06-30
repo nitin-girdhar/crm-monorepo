@@ -125,7 +125,7 @@ export async function getLeadById(
     const rows = await tx.unsafe(
       `SELECT ml.id, ml.org_id, ml.first_name, ml.middle_name, ml.last_name, ml.full_name,
               ml.phone, ml.email, ml.city, ml.address_line1, ml.address_line2, ml.pincode,
-              ml.branch_id, ml.source_id, ml.campaign_id, ml.stage_id, ml.outcome_id,
+              ml.source_id, ml.campaign_id, ml.stage_id, ml.outcome_id,
               ml.outcome_comment, ml.assigned_user_id, ml.city_id, ml.state_id, ml.country_id,
               ml.tags, ml.metadata, ml.is_active, ml.superseded_by,
               ml.created_at, ml.updated_at, ml.created_by,
@@ -139,7 +139,6 @@ export async function getLeadById(
               lso.requires_comment,
               u.full_name     AS assigned_rep_name,
               u.email         AS assigned_rep_email,
-              b.name          AS branch_name,
               src.name        AS source_name,
               ci.name         AS city_name,
               st.name         AS state_name,
@@ -148,7 +147,6 @@ export async function getLeadById(
        JOIN crm.lead_stage ls ON ls.id = ml.stage_id
        LEFT JOIN crm.lead_stage_outcome lso ON lso.id = ml.outcome_id
        LEFT JOIN iam.users u ON u.id = ml.assigned_user_id
-       LEFT JOIN entity.branches b ON b.id = ml.branch_id
        LEFT JOIN crm.lead_sources src ON src.id = ml.source_id
        LEFT JOIN geo.cities ci ON ci.id = ml.city_id
        LEFT JOIN geo.states st ON st.id = ml.state_id

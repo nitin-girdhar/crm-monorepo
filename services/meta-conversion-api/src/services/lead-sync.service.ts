@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { withServiceTx } from '@crm/db';
+import { withServiceTx, resolveAutoAssignedUser } from '@crm/db';
 import { resolveFieldMappings, type FieldMappingsConfig, type ResolvedFieldMappings } from '../config/meta.config.js';
 
 export interface MetaLeadFieldData {
@@ -183,10 +183,12 @@ export async function syncLeadToDatabase(
       );
     }
 
+    const autoAssignedUserId = await resolveAutoAssignedUser(tx, orgId);
+
     const marketingLeadResult = await tx.execute(
       sql`INSERT INTO crm.marketing_leads (
             org_id, first_name, middle_name, last_name, phone, email,
-            stage_id, source_id, metadata, created_at
+            stage_id, source_id, assigned_user_id, metadata, created_at
           ) VALUES (
             ${orgId},
             ${contact.firstName ?? ''},
@@ -196,6 +198,7 @@ export async function syncLeadToDatabase(
             ${contact.email},
             ${stageId ?? null},
             ${sourceId ?? null},
+            ${autoAssignedUserId},
             ${JSON.stringify({ meta_lead_id: lead.id, form_id: lead.form_id, platform: 'facebook' })},
             ${leadCreatedAt.toISOString()}
           )

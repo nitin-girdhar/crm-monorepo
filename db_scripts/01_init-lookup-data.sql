@@ -95,10 +95,11 @@ ON CONFLICT (name) DO UPDATE SET
 INSERT INTO crm.lead_stage (name, label, description, sort_order, followup_required, is_rejected, is_terminated) VALUES
   ('new',            'New',            'Lead just received — not yet contacted',                       1, FALSE, FALSE, FALSE),
   ('contacting',     'Contacting',     'Active outreach in progress — calls, WhatsApp, or email',      2, TRUE,  FALSE, FALSE),
-  ('qualified',      'Qualified',      'Lead confirmed as a genuine prospect with intent and budget',  3, TRUE,  FALSE, FALSE),
-  ('converted',      'Converted',      'Lead became a paying customer',                                4, FALSE, FALSE, TRUE),
-  ('unqualified',    'Unqualified',    'Lead did not qualify — outcome and note must be recorded',     5, FALSE, TRUE,  TRUE),
-  ('transferred_out','Transferred Out','Lead transferred to another org or partner',                   6, FALSE, FALSE, TRUE)
+  ('on_hold',        'On Hold',        'Follow-up temporarily paused — lead asked to be contacted later or is unreachable', 3, TRUE,  FALSE, FALSE),
+  ('qualified',      'Qualified',      'Lead confirmed as a genuine prospect with intent and budget',  4, TRUE,  FALSE, FALSE),
+  ('converted',      'Converted',      'Lead became a paying customer',                                5, FALSE, FALSE, TRUE),
+  ('unqualified',    'Unqualified',    'Lead did not qualify — outcome and note must be recorded',     6, FALSE, TRUE,  TRUE),
+  ('transferred_out','Transferred Out','Lead transferred to another org or partner',                   7, FALSE, FALSE, TRUE)
 ON CONFLICT (name) DO UPDATE SET
   label             = EXCLUDED.label,
   description       = EXCLUDED.description,

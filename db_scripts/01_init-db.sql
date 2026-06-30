@@ -409,6 +409,10 @@ CREATE TABLE IF NOT EXISTS iam.user_org_mapping (
   org_id     UUID        NOT NULL REFERENCES entity.organizations(id)  ON DELETE CASCADE,
   role_id    UUID        NOT NULL REFERENCES iam.user_roles(id)     ON DELETE RESTRICT,
   is_active  BOOLEAN     NOT NULL DEFAULT TRUE,
+  -- % share of new leads this user should auto-receive within this org.
+  -- Sums to 100 (or all-zero = auto-assignment disabled) across an org's
+  -- mapped rows; enforced at the application layer, not by a DB constraint.
+  lead_assignment_weight SMALLINT NOT NULL DEFAULT 0 CHECK (lead_assignment_weight BETWEEN 0 AND 100),
   granted_by UUID        REFERENCES iam.users(id)                   ON DELETE SET NULL,
   granted_at TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP(),
@@ -453,39 +457,6 @@ BEGIN
   WHERE uom.user_id = p_user_id AND uom.org_id = p_org_id AND uom.is_active;
   RETURN COALESCE(v_rank, -1);
 END; $$;
-
--- ── BRANCHES (monorepo addition: physical branch within an org) ───
-CREATE TABLE IF NOT EXISTS entity.branches (
-  id         UUID    PRIMARY KEY DEFAULT public.gen_uuidv7(),
-  org_id     UUID    NOT NULL REFERENCES entity.organizations(id) ON DELETE RESTRICT,
-  name       TEXT    NOT NULL,
-  is_active  BOOLEAN NOT NULL DEFAULT TRUE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT CLOCK_TIMESTAMP(),
-  UNIQUE (org_id, name)
-);
-
--- RLS: app_user sees only entity.branches of orgs they are mapped to.
-ALTER TABLE entity.branches ENABLE ROW LEVEL SECURITY;
-ALTER TABLE entity.branches FORCE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS org_isolation_policy    ON entity.branches;
-DROP POLICY IF EXISTS tenant_isolation_policy ON entity.branches;
-
-CREATE POLICY org_isolation_policy ON entity.branches AS PERMISSIVE FOR ALL TO app_user
-  USING (
-    org_id = ANY(iam.fn_user_active_orgs(
-      NULLIF(current_setting('app.current_user_id', true), '')::uuid
-    ))
-  );
-
-CREATE POLICY tenant_isolation_policy ON entity.branches AS PERMISSIVE FOR ALL TO tenant_admin
-  USING (
-    org_id IN (
-      SELECT id FROM entity.organizations
-      WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
-        AND NOT is_deleted
-    )
-  );
 
 -- ── AD_CAMPAIGNS ──────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS marketing.ad_campaigns (
@@ -560,7 +531,6 @@ CREATE TABLE IF NOT EXISTS crm.marketing_leads (
   -- source tracking
   campaign_id      UUID    REFERENCES marketing.ad_campaigns(id) ON DELETE SET NULL,
   source_id        UUID    REFERENCES crm.lead_sources(id),
-  branch_id        UUID    REFERENCES entity.branches(id),
   -- assignment
   assigned_user_id UUID    REFERENCES iam.users(id) ON DELETE SET NULL,
   -- lead linking: dedup chain + transfer supersession
@@ -1190,7 +1160,6 @@ SELECT
   ac.name              AS campaign_name,
   mp.name              AS platform,
   src.name             AS source,
-  br.name              AS branch,
   u.full_name          AS assigned_rep_name,
   u.email              AS assigned_rep_email,
   ml.assigned_user_id,
@@ -1208,7 +1177,6 @@ LEFT JOIN marketing.ad_campaigns     ac   ON ac.id   = ml.campaign_id
 LEFT JOIN marketing.marketing_platforms mp ON mp.id  = ac.platform_id
 LEFT JOIN iam.users            u    ON u.id    = ml.assigned_user_id
 LEFT JOIN crm.lead_sources     src  ON src.id  = ml.source_id
-LEFT JOIN entity.branches         br   ON br.id   = ml.branch_id
 LEFT JOIN geo.cities           ci   ON ci.id   = ml.city_id
 LEFT JOIN geo.states           st   ON st.id   = ml.state_id
 LEFT JOIN geo.countries        co   ON co.id   = ml.country_id;
@@ -1485,21 +1453,6 @@ JOIN entity.organizations  o  ON o.id  = uom.org_id   AND NOT o.is_deleted
 JOIN entity.tenants        t  ON t.id  = o.tenant_id   AND NOT t.is_deleted
 JOIN iam.user_roles     ur ON ur.id = uom.role_id
 WHERE uom.is_active;
-
--- Branches with org and tenant context (for dropdowns and filtering).
-CREATE OR REPLACE VIEW entity.vw_branch_lookup WITH (security_invoker = true) AS
-SELECT
-  b.id          AS branch_id,
-  b.name        AS branch_name,
-  b.is_active,
-  b.org_id,
-  o.name        AS org_name,
-  o.tenant_id,
-  t.name        AS tenant_name,
-  b.created_at
-FROM entity.branches       b
-JOIN entity.organizations  o ON o.id = b.org_id     AND NOT o.is_deleted
-JOIN entity.tenants        t ON t.id = o.tenant_id  AND NOT t.is_deleted;
 
 -- Ad campaigns with resolved platform and status names (for dropdowns).
 CREATE OR REPLACE VIEW marketing.vw_campaign_lookup WITH (security_invoker = true) AS
@@ -1970,7 +1923,7 @@ REVOKE DELETE ON TABLE
 GRANT SELECT ON TABLE
   iam.user_roles, crm.lead_stage, crm.lead_stage_outcome, crm.interaction_types, crm.follow_up_statuses,
   marketing.marketing_platforms, marketing.campaign_statuses, entity.org_types, entity.tenant_domains, entity.tenant_plan_types,
-  crm.lead_sources, entity.branches, entity.organizations,
+  crm.lead_sources, entity.organizations,
   geo.countries, geo.states, geo.cities
 TO app_user;
 
@@ -1982,7 +1935,7 @@ GRANT SELECT ON TABLE
   crm.vw_lead_followup_timeline, crm.vw_lead_assignment_timeline,
   crm.vw_sales_follow_up_pipeline, crm.vw_followup_pipeline_enriched,
   crm.vw_org_performance_snapshot,
-  iam.vw_user_org_access, entity.vw_branch_lookup, marketing.vw_campaign_lookup, crm.vw_rep_performance
+  iam.vw_user_org_access, marketing.vw_campaign_lookup, crm.vw_rep_performance
 TO app_user;
 
 GRANT EXECUTE ON FUNCTION iam.can_assign_to(UUID,UUID,UUID) TO app_user;
@@ -2000,7 +1953,7 @@ REVOKE INSERT, UPDATE, DELETE ON TABLE audit.audit_log FROM tenant_admin;
 GRANT SELECT ON TABLE
   iam.user_roles, crm.lead_stage, crm.lead_stage_outcome, crm.interaction_types, crm.follow_up_statuses,
   marketing.marketing_platforms, marketing.campaign_statuses, entity.org_types, entity.tenant_domains, entity.tenant_plan_types,
-  crm.lead_sources, entity.branches,
+  crm.lead_sources,
   geo.countries, geo.states, geo.cities
 TO tenant_admin;
 
@@ -2010,7 +1963,7 @@ GRANT SELECT ON TABLE
   crm.vw_sales_follow_up_pipeline, crm.vw_followup_pipeline_enriched,
   marketing.vw_tenant_campaign_summary, crm.vw_tenant_full_dashboard,
   crm.vw_org_performance_snapshot,
-  iam.vw_user_org_access, entity.vw_branch_lookup, marketing.vw_campaign_lookup, crm.vw_rep_performance
+  iam.vw_user_org_access, marketing.vw_campaign_lookup, crm.vw_rep_performance
 TO tenant_admin;
 
 GRANT EXECUTE ON FUNCTION iam.can_assign_to(UUID,UUID,UUID) TO tenant_admin;
@@ -2454,12 +2407,8 @@ REVOKE DELETE ON TABLE iam.user_org_mapping FROM tenant_admin;
 
 GRANT ALL PRIVILEGES ON TABLE iam.user_org_mapping TO crm_service;
 
--- tenant_admin can also manage entity.organizations and entity.branches
+-- tenant_admin can also manage entity.organizations
 GRANT INSERT, UPDATE ON TABLE entity.organizations TO tenant_admin;
-GRANT INSERT, UPDATE ON TABLE entity.branches TO tenant_admin;
-
--- app_user can INSERT entity.branches (org admins create entity.branches within their org)
-GRANT INSERT, UPDATE ON TABLE entity.branches TO app_user;
 
 GRANT EXECUTE ON FUNCTION iam.fn_user_active_orgs(UUID)  TO app_user, tenant_admin;
 GRANT EXECUTE ON FUNCTION iam.fn_org_active_users(UUID)  TO app_user, tenant_admin;

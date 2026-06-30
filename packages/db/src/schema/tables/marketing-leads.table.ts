@@ -9,7 +9,6 @@ import { leadStageTable } from './lead-stage.table';
 import { leadStageOutcomeTable } from './lead-stage-outcome.table';
 import { adCampaignsTable } from './ad-campaigns.table';
 import { leadSourcesTable } from './lead-sources.table';
-import { branchesTable } from './branches.table';
 import { usersTable } from './users.table';
 
 export const marketingLeadsTable = crmSchema.table('marketing_leads', {
@@ -36,7 +35,6 @@ export const marketingLeadsTable = crmSchema.table('marketing_leads', {
   outcomeComment:  text('outcome_comment'),
   campaignId:      uuid('campaign_id').references(() => adCampaignsTable.id, { onDelete: 'set null' }),
   sourceId:        uuid('source_id').references(() => leadSourcesTable.id),
-  branchId:        uuid('branch_id').references(() => branchesTable.id),
   assignedUserId:  uuid('assigned_user_id').references(() => usersTable.id, { onDelete: 'set null' }),
   isActive:        boolean('is_active').notNull().default(true),
   supersededBy:    uuid('superseded_by').references((): any => marketingLeadsTable.id, { onDelete: 'set null' }),

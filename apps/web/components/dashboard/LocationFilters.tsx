@@ -2,7 +2,7 @@
 
 import MultiSelect, { type SelectOption } from './MultiSelect';
 import type { LocationOption } from '@/hooks/useLocationFilters';
-import type { DynamicBranch } from '@/hooks/useBranches';
+import type { DynamicOrg } from '@/hooks/useOrgs';
 
 function toOption(o: LocationOption): SelectOption {
   return { id: o.id, label: o.name };
@@ -25,10 +25,10 @@ interface Props {
   loadingCountries: boolean;
   loadingStates: boolean;
   loadingCities: boolean;
-  branches: DynamicBranch[];
-  selectedBranches: DynamicBranch[];
-  onBranchesChange: (next: DynamicBranch[]) => void;
-  loadingBranches: boolean;
+  orgs: DynamicOrg[];
+  selectedOrgs: DynamicOrg[];
+  onOrgsChange: (next: DynamicOrg[]) => void;
+  loadingOrgs: boolean;
   leadSources: string[];
   selectedSources: string[];
   onSourcesChange: (next: string[]) => void;
@@ -40,19 +40,19 @@ export default function LocationFilters({
   selectedCountries, selectedStates, selectedCities,
   onCountriesChange, onStatesChange, onCitiesChange,
   loadingCountries, loadingStates, loadingCities,
-  branches, selectedBranches, onBranchesChange, loadingBranches,
+  orgs, selectedOrgs, onOrgsChange, loadingOrgs,
   leadSources, selectedSources, onSourcesChange, loadingSources,
 }: Props) {
-  const branchOptions: SelectOption[]        = branches.map((b) => ({ id: b.id, label: b.name }));
-  const selectedBranchOptions: SelectOption[] = selectedBranches.map((b) => ({ id: b.id, label: b.name }));
+  const orgOptions: SelectOption[]         = orgs.map((o) => ({ id: o.id, label: o.name }));
+  const selectedOrgOptions: SelectOption[] = selectedOrgs.map((o) => ({ id: o.id, label: o.name }));
   const sourceOptions: SelectOption[]         = leadSources.map((s) => ({ id: s, label: s }));
   const selectedSourceOptions: SelectOption[] = selectedSources.map((s) => ({ id: s, label: s }));
 
-  const handleBranchesChange = (next: SelectOption[]) => {
-    const nextBranches = next.map(
-      (o) => branches.find((b) => b.id === o.id) ?? { id: o.id as string, name: o.label, cityId: null, stateId: null, countryId: null },
+  const handleOrgsChange = (next: SelectOption[]) => {
+    const nextOrgs = next.map(
+      (o) => orgs.find((org) => org.id === o.id) ?? { id: o.id as string, name: o.label, cityId: null, stateId: null, countryId: null },
     );
-    onBranchesChange(nextBranches);
+    onOrgsChange(nextOrgs);
   };
 
   return (
@@ -87,12 +87,12 @@ export default function LocationFilters({
       />
 
       <MultiSelect
-        label="Branch"
-        placeholder="All branches"
-        options={branchOptions}
-        selected={selectedBranchOptions}
-        onChange={handleBranchesChange}
-        loading={loadingBranches}
+        label="Org"
+        placeholder="All orgs"
+        options={orgOptions}
+        selected={selectedOrgOptions}
+        onChange={handleOrgsChange}
+        loading={loadingOrgs}
       />
 
       <MultiSelect

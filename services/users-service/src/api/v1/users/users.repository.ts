@@ -8,6 +8,7 @@ import {
   vwUserTeamMembers,
   vwUserOrgChart,
 } from '@crm/db/schema';
+import { RANKS } from '@crm/permissions';
 import { BadRequestError } from '../../../lib/errors.js';
 
 export async function listUsers(ctx: RoleTxContext, page: number, pageSize: number) {
@@ -76,6 +77,61 @@ export async function getUserByIdAsService(userId: string) {
       WHERE u.id = ${userId}::uuid AND NOT u.is_deleted
     `)) as Array<Record<string, unknown>>;
     return rows[0] ?? null;
+  });
+}
+
+export async function getAssignmentWeights(ctx: RoleTxContext) {
+  return withRoleTx(ctx, async (tx) => {
+    return (await tx.execute(sql`
+      SELECT u.id AS user_id, u.full_name, u.email,
+             ur.name AS role_name, ur.label AS role_label, ur.rank,
+             uom.lead_assignment_weight AS weight
+      FROM iam.user_org_mapping uom
+      JOIN iam.users u       ON u.id  = uom.user_id
+      JOIN iam.user_roles ur ON ur.id = uom.role_id
+      WHERE uom.org_id = ${ctx.org_id}::uuid AND uom.is_active AND NOT u.is_deleted AND u.is_active
+        AND ur.rank > ${RANKS.READ_ONLY} AND ur.rank < ${RANKS.ADMIN}
+      ORDER BY ur.rank DESC, u.full_name
+    `)) as Array<Record<string, unknown>>;
+  });
+}
+
+export async function updateAssignmentWeights(
+  ctx: RoleTxContext,
+  weights: Array<{ user_id: string; weight: number }>,
+) {
+  return withRoleTx(ctx, async (tx) => {
+    const userIds = weights.map((w) => w.user_id);
+
+    // Confirm every targeted user is actually eligible (active mapping, in-range rank)
+    // in this org before writing anything — prevents setting a weight on a user who
+    // wouldn't be picked by resolveAutoAssignedUser anyway.
+    const eligible = (await tx.execute(sql`
+      SELECT uom.user_id
+      FROM iam.user_org_mapping uom
+      JOIN iam.user_roles ur ON ur.id = uom.role_id
+      WHERE uom.org_id = ${ctx.org_id}::uuid AND uom.is_active
+        AND ur.rank > ${RANKS.READ_ONLY} AND ur.rank < ${RANKS.ADMIN}
+        AND uom.user_id = ANY(${userIds}::uuid[])
+    `)) as Array<{ user_id: string }>;
+    const eligibleIds = new Set(eligible.map((r) => r.user_id));
+    const ineligible = userIds.filter((id) => !eligibleIds.has(id));
+    if (ineligible.length > 0) {
+      throw new BadRequestError(`Users not eligible for lead assignment in this org: ${ineligible.join(', ')}`);
+    }
+
+    const sum = weights.reduce((s, w) => s + w.weight, 0);
+    if (sum !== 100 && sum !== 0) {
+      throw new BadRequestError(`Assignment weights must sum to 100 (or 0 to disable auto-assignment), got ${sum}`);
+    }
+
+    for (const w of weights) {
+      await tx.execute(sql`
+        UPDATE iam.user_org_mapping
+        SET lead_assignment_weight = ${w.weight}, updated_at = NOW()
+        WHERE user_id = ${w.user_id}::uuid AND org_id = ${ctx.org_id}::uuid
+      `);
+    }
   });
 }
 

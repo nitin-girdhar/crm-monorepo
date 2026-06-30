@@ -149,7 +149,7 @@ export async function getOrgChart(
   });
 }
 
-export async function getBranches(
+export async function getOrgs(
   org_id: string,
   user_id: string,
   role: string,
@@ -193,7 +193,7 @@ export async function getBranches(
   });
 }
 
-export async function getAllBranches(org_id: string, user_id: string, role = 'org_admin', tenant_id = '') {
+export async function getAllOrgs(org_id: string, user_id: string, role = 'org_admin', tenant_id = '') {
   const ctx: RoleTxContext = { role, org_id, tenant_id, user_id };
   return withRoleTx(ctx, async (tx) => {
     return tx.unsafe(

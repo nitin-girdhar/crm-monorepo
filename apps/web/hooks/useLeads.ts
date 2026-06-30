@@ -69,7 +69,7 @@ export function useLeads(orgIds?: string[], platforms?: string[]): UseLeadsRetur
       const ids   = orgIdsRef.current;
       const plats = platformsRef.current;
 
-      // Empty array = location filter active but no branches match → show nothing
+      // Empty array = location filter active but no orgs match → show nothing
       if (ids !== undefined && ids.length === 0) {
         setLeads([]);
         setLastUpdated(new Date());

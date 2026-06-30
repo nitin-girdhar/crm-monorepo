@@ -39,7 +39,7 @@ crm_monorepo/
 └── services/
     ├── api-gateway/       # JWT validation + reverse proxy (port 4000)
     ├── auth-service/      # Login, logout, /me, change-password (port 4001)
-    ├── users-service/     # User CRUD, org-chart, branches (port 4002)
+    ├── users-service/     # User CRUD, org-chart, orgs (port 4002)
     ├── leads-service/     # Lead CRUD, follow-ups, interactions (port 4003)
     ├── assignments-service/ # Lead assignment management (port 4004)
     ├── analytics-service/ # Dashboard & pipeline metrics (port 4005)
@@ -54,7 +54,7 @@ Tables are organised into PostgreSQL schemas for namespace clarity:
 | Schema | Tables |
 |---|---|
 | `geo` | countries, states, cities |
-| `entity` | tenants, organizations, branches, org_types, tenant_domains, tenant_plan_types |
+| `entity` | tenants, organizations, org_types, tenant_domains, tenant_plan_types |
 | `iam` | users, user_roles, user_org_mapping, token_blocklist |
 | `crm` | marketing_leads, lead_stage, lead_stage_outcome, lead_sources, lead_interactions, lead_follow_ups, lead_assignment_log, lead_status_log, interaction_types, follow_up_statuses |
 | `marketing` | ad_campaigns, marketing_platforms, campaign_statuses |
@@ -101,7 +101,7 @@ The `api-testing/` folder contains a complete [Bruno](https://www.usebruno.com/)
 | Assignments | CRUD, My Assignments |
 | Analytics | Dashboard, Campaign Dashboard, Performance, Pipeline |
 | Activities | List (Audit Log) |
-| Branches | Filtered, All, Lead Sources |
+| Orgs | Filtered, All, Lead Sources |
 | Intake | Webhook Lead Intake |
 | Meta-CAPI | Integration CRUD, CRM Event (Manual), Auto-Trigger |
 

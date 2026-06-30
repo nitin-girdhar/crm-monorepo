@@ -10,7 +10,10 @@ export const createLeadSchema = z.object({
   address_line1: z.string().max(255).optional(),
   address_line2: z.string().max(255).optional(),
   pincode: z.string().regex(/^\d{4,10}$/, 'Invalid pincode').optional(),
-  branch_id: z.string().uuid('Invalid branch_id').optional(),
+  // Target org for the lead. Optional — defaults to the actor's own org.
+  // The DB enforces this via RLS WITH CHECK: app_user is pinned to its own org_id;
+  // tenant_admin may target any org within its tenant. Never trusted blindly.
+  org_id: z.string().uuid('Invalid org_id').optional(),
   source_id: z.string().uuid('Invalid source_id').optional(),
   campaign_id: z.string().uuid('Invalid campaign_id').optional(),
   stage_id: z.string().uuid('Invalid stage_id').optional(),
@@ -44,7 +47,6 @@ export const updateLeadSchema = z.object({
   address_line1: z.string().max(255).optional(),
   address_line2: z.string().max(255).optional().nullable(),
   pincode: z.string().regex(/^\d{4,10}$/).optional(),
-  branch_id: z.string().uuid().optional(),
   source_id: z.string().uuid().optional(),
   tags: z.array(z.string().max(50)).max(20).optional(),
   metadata: z.record(z.unknown()).optional(),

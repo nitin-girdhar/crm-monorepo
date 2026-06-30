@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import type { SessionUser } from "@crm/types";
 import type { AssignmentView } from "@/src/types/leads";
 import { assignments as assignmentsApi, leads as leadsApi } from "@/src/lib/api/client";
-import { useBranches } from "@/hooks/useBranches";
+import { useOrgs } from "@/hooks/useOrgs";
 import Modal from "@/components/users/Modal";
 import AssignmentSelector from "./AssignmentSelector";
 
@@ -28,13 +28,13 @@ export default function AssignLeadModal({
   existing,
 }: Props) {
   const router = useRouter();
-  const { branches } = useBranches();
+  const { orgs } = useOrgs();
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
-  const [branchId, setBranchId] = useState("");
+  const [orgId, setOrgId] = useState("");
 
   const validAssignedTo = (id: string | null | undefined) =>
     candidates.some((c) => c.id === id) ? (id ?? "") : "";
@@ -55,7 +55,7 @@ export default function AssignLeadModal({
     setLastName("");
     setPhone("");
     setEmail("");
-    setBranchId("");
+    setOrgId("");
     setAssignedTo(validAssignedTo(existing?.assigned_to));
     setNotes("");
     setError(null);
@@ -125,8 +125,8 @@ export default function AssignLeadModal({
       setEmailError("Enter a valid email address.");
       return;
     }
-    if (!branchId) {
-      setError("Select a branch.");
+    if (!orgId) {
+      setError("Select an org.");
       return;
     }
     if (!assignedTo) {
@@ -141,21 +141,21 @@ export default function AssignLeadModal({
     setPending(true);
     try {
       await leadsApi.create({
-        firstName: firstName.trim(),
-        lastName: lastName.trim() || undefined,
+        first_name: firstName.trim(),
+        last_name: lastName.trim() || undefined,
         phone: phone.trim(),
         email: email.trim() || undefined,
-        orgId: branchId,
-        assignedUserId: assignedTo,
+        org_id: orgId,
+        assigned_user_id: assignedTo,
         metadata: { source: "walk-in", initial_notes: notes.trim() },
       });
       close();
     } catch (err: unknown) {
       const body = (err as { body?: { error?: string; field?: string } }).body;
       if (body?.field === "phone") {
-        setPhoneError(body.error ?? "Phone number already exists in this branch.");
+        setPhoneError(body.error ?? "Phone number already exists in this org.");
       } else if (body?.field === "email") {
-        setEmailError(body.error ?? "Email already exists in this branch.");
+        setEmailError(body.error ?? "Email already exists in this org.");
       } else {
         setError(err instanceof Error ? err.message : "Network error.");
       }
@@ -201,7 +201,7 @@ export default function AssignLeadModal({
           <>
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-semibold text-[#0F172A]">
-                Branch
+                Org
               </label>
               <input
                 type="text"
@@ -325,22 +325,22 @@ export default function AssignLeadModal({
 
             <div className="flex flex-col gap-1.5">
               <label
-                htmlFor="wl-branch"
+                htmlFor="wl-org"
                 className="text-xs font-semibold text-[#0F172A]"
               >
-                Branch <span className="font-normal text-red-500">*</span>
+                Org <span className="font-normal text-red-500">*</span>
               </label>
               <select
-                id="wl-branch"
-                value={branchId}
-                onChange={(e) => setBranchId(e.target.value)}
+                id="wl-org"
+                value={orgId}
+                onChange={(e) => setOrgId(e.target.value)}
                 disabled={pending}
                 className="rounded-xl border border-[#E2E8F0] bg-white px-3 py-2.5 text-sm text-[#0F172A] shadow-sm focus:border-[#0b6cbf] focus:outline-none focus:ring-2 focus:ring-[#0b6cbf]/20 disabled:cursor-not-allowed disabled:bg-[#F8FAFC]"
               >
-                <option value="">Select a branch…</option>
-                {branches.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
+                <option value="">Select an org…</option>
+                {orgs.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
                   </option>
                 ))}
               </select>

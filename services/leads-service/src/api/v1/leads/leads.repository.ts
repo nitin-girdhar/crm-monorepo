@@ -1,5 +1,5 @@
 import { sql, and, eq, asc } from 'drizzle-orm';
-import { withRoleTx, withServiceTx } from '@crm/db';
+import { withRoleTx, withServiceTx, resolveAutoAssignedUser } from '@crm/db';
 import type { RoleTxContext } from '@crm/db';
 import {
   leadStageTable,
@@ -91,7 +91,7 @@ export async function getLeadById(ctx: RoleTxContext, leadId: string) {
     const rows = (await tx.execute(sql`
       SELECT ml.id, ml.org_id, ml.first_name, ml.middle_name, ml.last_name, ml.full_name,
              ml.phone, ml.email, ml.city, ml.address_line1, ml.address_line2, ml.pincode,
-             ml.branch_id, ml.source_id, ml.campaign_id, ml.stage_id, ml.outcome_id,
+             ml.source_id, ml.campaign_id, ml.stage_id, ml.outcome_id,
              ml.outcome_comment, ml.assigned_user_id, ml.city_id, ml.state_id, ml.country_id,
              ml.tags, ml.metadata, ml.is_active, ml.superseded_by,
              ml.created_at, ml.updated_at, ml.created_by,
@@ -105,7 +105,6 @@ export async function getLeadById(ctx: RoleTxContext, leadId: string) {
              lso.requires_comment,
              u.full_name     AS assigned_rep_name,
              u.email         AS assigned_rep_email,
-             b.name          AS branch_name,
              src.name        AS source_name,
              ci.name         AS city_name,
              st.name         AS state_name,
@@ -114,7 +113,6 @@ export async function getLeadById(ctx: RoleTxContext, leadId: string) {
       JOIN crm.lead_stage ls ON ls.id = ml.stage_id
       LEFT JOIN crm.lead_stage_outcome lso ON lso.id = ml.outcome_id
       LEFT JOIN iam.users u ON u.id = ml.assigned_user_id
-      LEFT JOIN entity.branches b ON b.id = ml.branch_id
       LEFT JOIN crm.lead_sources src ON src.id = ml.source_id
       LEFT JOIN geo.cities ci ON ci.id = ml.city_id
       LEFT JOIN geo.states st ON st.id = ml.state_id
@@ -291,6 +289,13 @@ export async function createLead(ctx: RoleTxContext, data: CreateLeadInput) {
       .limit(1);
     if (!defaultStage) throw new Error('Lead stage "new" not found');
 
+    // Target org for the new lead. Defaults to the actor's own org; tenant_admin
+    // may target any org within its tenant. The DB enforces this via the
+    // org_isolation_policy / tenant_isolation_policy RLS WITH CHECK on
+    // crm.marketing_leads — an unauthorized org_id is rejected at insert time,
+    // it is never trusted on the basis of the request body alone.
+    const targetOrgId = data.org_id ?? ctx.org_id;
+
     let duplicateLeadId: string | null = null;
 
     if (data.phone) {
@@ -298,7 +303,7 @@ export async function createLead(ctx: RoleTxContext, data: CreateLeadInput) {
         .select({ id: marketingLeadsTable.id })
         .from(marketingLeadsTable)
         .where(and(
-          eq(marketingLeadsTable.orgId, ctx.org_id),
+          eq(marketingLeadsTable.orgId, targetOrgId),
           eq(marketingLeadsTable.phone, data.phone),
           eq(marketingLeadsTable.isDeleted, false),
         ))
@@ -312,7 +317,7 @@ export async function createLead(ctx: RoleTxContext, data: CreateLeadInput) {
         .select({ id: marketingLeadsTable.id })
         .from(marketingLeadsTable)
         .where(and(
-          eq(marketingLeadsTable.orgId, ctx.org_id),
+          eq(marketingLeadsTable.orgId, targetOrgId),
           eq(marketingLeadsTable.email, data.email),
           eq(marketingLeadsTable.isDeleted, false),
         ))
@@ -321,10 +326,12 @@ export async function createLead(ctx: RoleTxContext, data: CreateLeadInput) {
       if (existing) duplicateLeadId = existing.id;
     }
 
+    const assignedUserId = data.assigned_user_id ?? await resolveAutoAssignedUser(tx, targetOrgId);
+
     const [inserted] = await tx
       .insert(marketingLeadsTable)
       .values({
-        orgId: ctx.org_id,
+        orgId: targetOrgId,
         firstName: data.first_name,
         middleName: data.middle_name ?? null,
         lastName: data.last_name ?? '',
@@ -334,11 +341,10 @@ export async function createLead(ctx: RoleTxContext, data: CreateLeadInput) {
         addressLine1: data.address_line1 ?? null,
         addressLine2: data.address_line2 ?? null,
         pincode: data.pincode ?? null,
-        branchId: data.branch_id ?? null,
         sourceId: data.source_id ?? null,
         campaignId: data.campaign_id ?? null,
         stageId: data.stage_id ?? defaultStage.id,
-        assignedUserId: data.assigned_user_id ?? null,
+        assignedUserId,
         cityId: data.city_id ?? null,
         stateId: data.state_id ?? null,
         countryId: data.country_id ?? null,
@@ -385,7 +391,6 @@ export async function updateLead(ctx: RoleTxContext, leadId: string, data: Updat
     if (data.address_line1 !== undefined)  updateData['addressLine1']  = data.address_line1;
     if (data.address_line2 !== undefined)  updateData['addressLine2']  = data.address_line2;
     if (data.pincode !== undefined)        updateData['pincode']       = data.pincode;
-    if (data.branch_id !== undefined)      updateData['branchId']      = data.branch_id;
     if (data.source_id !== undefined)      updateData['sourceId']      = data.source_id;
     if (data.tags !== undefined)           updateData['tags']          = coerceTags(data.tags);
     if (data.metadata !== undefined)       updateData['metadata']      = data.metadata;

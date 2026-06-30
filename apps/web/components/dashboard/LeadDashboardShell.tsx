@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SessionUser } from '@crm/types';
 import { users as usersApi } from '@/src/lib/api/client';
-import { useBranches, type DynamicBranch } from '@/hooks/useBranches';
+import { useOrgs, type DynamicOrg } from '@/hooks/useOrgs';
 import { useLeads } from '@/hooks/useLeads';
 import { useRealtimeEvents } from '@/hooks/useRealtimeEvents';
 import { useNotifications } from '@/providers/NotificationProvider';
@@ -67,42 +67,42 @@ export default function LeadDashboardShell({ actor }: Props) {
     return f;
   }, [selectedCountries, selectedStates, selectedCities]);
 
-  const { branches, loading: branchesLoading, error: branchesError } = useBranches(locationFilter);
-  const [selectedBranches, setSelectedBranches] = useState<DynamicBranch[]>([]);
+  const { orgs, loading: orgsLoading, error: orgsError } = useOrgs(locationFilter);
+  const [selectedOrgs, setSelectedOrgs] = useState<DynamicOrg[]>([]);
   const { sources: leadSources, loading: sourcesLoading } = useLeadSources();
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
 
   const hasLocationFilter = selectedCountries.length > 0 || selectedStates.length > 0 || selectedCities.length > 0;
 
-  // When a location filter is active, auto-select all matching branches so the
-  // grid filters immediately without requiring a separate branch pick.
-  // When location is cleared, clear branch selection too.
+  // When a location filter is active, auto-select all matching orgs so the
+  // grid filters immediately without requiring a separate org pick.
+  // When location is cleared, clear org selection too.
   useEffect(() => {
-    if (branchesLoading) return;
+    if (orgsLoading) return;
     if (hasLocationFilter) {
-      setSelectedBranches(branches);
+      setSelectedOrgs(orgs);
     } else {
-      setSelectedBranches([]);
+      setSelectedOrgs([]);
     }
-  }, [branches, hasLocationFilter, branchesLoading]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [orgs, hasLocationFilter, orgsLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // undefined  = no location/branch filter → fetch all leads for session org
-  // []         = location filter active but no matching branches → show nothing
-  // ['uuid..'] = specific branches selected → filter by those org IDs
+  // undefined  = no location/org filter → fetch all leads for session org
+  // []         = location filter active but no matching orgs → show nothing
+  // ['uuid..'] = specific orgs selected → filter by those org IDs
   const orgIds = useMemo(
     () => hasLocationFilter
-      ? selectedBranches.map(b => b.id)
-      : selectedBranches.length > 0
-        ? selectedBranches.map(b => b.id)
+      ? selectedOrgs.map(o => o.id)
+      : selectedOrgs.length > 0
+        ? selectedOrgs.map(o => o.id)
         : undefined,
-    [selectedBranches, hasLocationFilter],
+    [selectedOrgs, hasLocationFilter],
   );
   const platforms = useMemo(
     () => selectedSources.length > 0 ? selectedSources : undefined,
     [selectedSources],
   );
 
-  const primaryBranch = selectedBranches[0] ?? branches[0] ?? null;
+  const primaryOrg = selectedOrgs[0] ?? orgs[0] ?? null;
 
   const {
     leads, stats, loading, error,
@@ -167,13 +167,13 @@ export default function LeadDashboardShell({ actor }: Props) {
   const exportLeads = (format: ExportFormat) => {
     const rows     = applyLeadFilter(leads, activeFilter, requiresFollowupStatuses);
     const columns  = buildLeadExportColumns();
-    const branchLabel = selectedBranches.length === 1
-      ? selectedBranches[0].name
-      : selectedBranches.length > 1
-        ? `${selectedBranches.length}-branches`
-        : primaryBranch?.name ?? '';
+    const orgLabel = selectedOrgs.length === 1
+      ? selectedOrgs[0].name
+      : selectedOrgs.length > 1
+        ? `${selectedOrgs.length}-orgs`
+        : primaryOrg?.name ?? '';
     const filename = buildFilename([
-      branchLabel,
+      orgLabel,
       activeFilter === 'all' ? '' : FILTER_LABELS[activeFilter],
     ]);
     exportRows(rows, columns, filename, format);
@@ -181,16 +181,16 @@ export default function LeadDashboardShell({ actor }: Props) {
 
   const exportableCount = applyLeadFilter(leads, activeFilter, requiresFollowupStatuses).length;
 
-  const branchLabel = selectedBranches.length === 0
-    ? (primaryBranch?.name ?? '—')
-    : selectedBranches.length === 1
-      ? selectedBranches[0].name
-      : `${selectedBranches.length} branches`;
+  const orgLabel = selectedOrgs.length === 0
+    ? (primaryOrg?.name ?? '—')
+    : selectedOrgs.length === 1
+      ? selectedOrgs[0].name
+      : `${selectedOrgs.length} orgs`;
 
   return (
     <div className="flex w-full flex-1 flex-col bg-[#F8FAFC] lg:min-h-0">
 
-      {/* Location + branch filters */}
+      {/* Location + org filters */}
       <LocationFilters
         countries={countries}
         states={states}
@@ -204,19 +204,19 @@ export default function LeadDashboardShell({ actor }: Props) {
         loadingCountries={loadingCountries}
         loadingStates={loadingStates}
         loadingCities={loadingCities}
-        branches={branches}
-        selectedBranches={selectedBranches}
-        onBranchesChange={setSelectedBranches}
-        loadingBranches={branchesLoading}
+        orgs={orgs}
+        selectedOrgs={selectedOrgs}
+        onOrgsChange={setSelectedOrgs}
+        loadingOrgs={orgsLoading}
         leadSources={leadSources}
         selectedSources={selectedSources}
         onSourcesChange={setSelectedSources}
         loadingSources={sourcesLoading}
       />
 
-      {branchesError && (
+      {orgsError && (
         <div className="mx-4 mt-2 shrink-0 rounded-lg border border-orange-100 bg-orange-50 px-4 py-2 text-xs text-[#EA580C] sm:mx-5">
-          Could not load branches: {branchesError}
+          Could not load orgs: {orgsError}
         </div>
       )}
 
@@ -236,7 +236,7 @@ export default function LeadDashboardShell({ actor }: Props) {
       {/* Toolbar */}
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[#E2E8F0] bg-white px-4 py-1.5 sm:px-5 sm:py-2">
         <div className="flex min-w-0 items-center gap-2.5">
-          <span className="shrink-0 text-sm font-semibold text-[#0F172A]">{branchLabel}</span>
+          <span className="shrink-0 text-sm font-semibold text-[#0F172A]">{orgLabel}</span>
           {!loading && (
             <span className="shrink-0 rounded-full border border-[#E2E8F0] bg-[#F1F5F9] px-2 py-0.5 text-xs font-medium tabular-nums text-[#64748B]">
               {stats.serverTotal} total
@@ -272,7 +272,7 @@ export default function LeadDashboardShell({ actor }: Props) {
         <div className="flex w-full flex-1 flex-col rounded-xl border border-[#E2E8F0] bg-white shadow-sm lg:min-h-0 lg:overflow-hidden">
           <LeadsTable
             leads={leads}
-            loading={loading || branchesLoading}
+            loading={loading || orgsLoading}
             statusFilter={activeFilter}
             onUpdate={updateLead}
             newLeadRowKeys={new Set()}

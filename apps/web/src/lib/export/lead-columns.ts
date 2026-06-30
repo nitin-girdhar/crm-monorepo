@@ -15,7 +15,7 @@ export function buildLeadExportColumns(): ExportColumn<LeadView>[] {
     { header: 'Outcome', value: (l) => l.outcome_label ?? l.outcome ?? '' },
     { header: 'Remarks', value: (l) => (l.metadata?.remarks as string) ?? '' },
     { header: 'Assigned To', value: (l) => l.assigned_rep_name ?? '' },
-    { header: 'Branch', value: (l) => l.branch ?? '' },
+    { header: 'Org', value: (l) => l.org_name ?? '' },
     { header: 'City', value: (l) => l.city_name ?? l.city ?? '' },
   ];
 }

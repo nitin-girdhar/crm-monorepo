@@ -4,6 +4,7 @@ import { canAssignToUser, RANKS, getRulesForTenant, getLeadsHistoryAssignedToSco
 import type { LeadsHistoryFilters } from './assignments.repository.js';
 import { BadRequestError, ForbiddenError, NotFoundError, ConflictError } from '../../../lib/errors.js';
 import { logActivity } from '../../../lib/activity-logger.js';
+import { publishEvent } from '../../../events/publisher.js';
 import * as repo from './assignments.repository.js';
 
 export async function listAllAssignments(ctx: RoleTxContext, page: number, pageSize: number) {
@@ -58,6 +59,14 @@ export async function createAssignment(ctx: RoleTxContext, actorRank: number, da
       new_value: { assigned_to: data.assigned_to },
     });
 
+    publishEvent('lead:updated', {
+      lead_id: data.lead_id,
+      org_id: result['org_id'],
+      tenant_id: ctx.tenant_id,
+      assigned_user_id: data.assigned_to,
+      actor_id: ctx.user_id,
+    });
+
     return result;
   } catch (err) {
     if ((err as Error & { code?: string }).code === '23505' || (err as Error).message.includes('already assigned')) {
@@ -94,6 +103,14 @@ export async function reassignLead(ctx: RoleTxContext, actorRank: number, leadId
     old_value: { assigned_to: previous_assignee },
     new_value: { assigned_to: data.assigned_to },
   });
+
+  publishEvent('lead:updated', {
+    lead_id: leadId,
+    org_id: result['org_id'],
+    tenant_id: ctx.tenant_id,
+    assigned_user_id: data.assigned_to,
+    actor_id: ctx.user_id,
+  });
 }
 
 export async function unassignLead(ctx: RoleTxContext, actorRank: number, leadId: string) {
@@ -101,6 +118,14 @@ export async function unassignLead(ctx: RoleTxContext, actorRank: number, leadId
   const result = await repo.unassignLead(ctx, leadId);
   if (!result) throw new NotFoundError('Assignment not found');
   await logActivity({ action_type: 'assignment_removed', performed_by: ctx.user_id, lead_id: leadId });
+
+  publishEvent('lead:updated', {
+    lead_id: leadId,
+    org_id: result['org_id'],
+    tenant_id: ctx.tenant_id,
+    assigned_user_id: null,
+    actor_id: ctx.user_id,
+  });
 }
 
 export interface LeadsHistoryParams {

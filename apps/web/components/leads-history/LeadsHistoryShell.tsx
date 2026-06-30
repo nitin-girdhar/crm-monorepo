@@ -6,7 +6,7 @@ import { getRulesForTenant, canSeeAssignedToFilter, getLeadsHistoryAssignedToSco
 import type { AssignmentView, StageOption, StageOutcome } from '@/src/types/leads';
 import { useLeadsHistory } from '@/hooks/useLeadsHistory';
 import type { LeadsHistoryFilters } from '@/hooks/useLeadsHistory';
-import { users as usersApi, branches as branchesApi } from '@/src/lib/api/client';
+import { users as usersApi, orgs as orgsApi } from '@/src/lib/api/client';
 import Pagination from '@/components/common/Pagination';
 import DownloadButton from '@/components/common/DownloadButton';
 import AssigneeBadge from '@/components/assignments/AssigneeBadge';
@@ -18,7 +18,7 @@ interface Props {
 }
 
 interface UserOption { id: string; label: string }
-interface BranchOption { id: string; name: string }
+interface OrgOption { id: string; name: string }
 
 function defaultDateFrom(): string {
   const d = new Date();
@@ -59,11 +59,11 @@ export default function LeadsHistoryShell({ actor }: Props) {
   const [dateTo, setDateTo] = useState(today);
   const [selectedStages, setSelectedStages] = useState<string[]>([]);
   const [selectedOutcomes, setSelectedOutcomes] = useState<string[]>([]);
-  const [selectedBranches, setSelectedBranches] = useState<string[]>([]);
+  const [selectedOrgs, setSelectedOrgs] = useState<string[]>([]);
   const [assignedTo, setAssignedTo] = useState('');
 
   const [assignableUsers, setAssignableUsers] = useState<UserOption[]>([]);
-  const [branches, setBranches] = useState<BranchOption[]>([]);
+  const [orgs, setOrgs] = useState<OrgOption[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
 
   const {
@@ -87,11 +87,11 @@ export default function LeadsHistoryShell({ actor }: Props) {
       date_to: dateTo || undefined,
       stage_ids: stageIds.length ? stageIds.join(',') : undefined,
       outcome_ids: selectedOutcomes.length ? selectedOutcomes.join(',') : undefined,
-      org_ids: selectedBranches.length ? selectedBranches.join(',') : undefined,
+      org_ids: selectedOrgs.length ? selectedOrgs.join(',') : undefined,
       assigned_to: assignedTo || undefined,
       active_only: false,
     };
-  }, [dateFrom, dateTo, selectedStages, selectedOutcomes, selectedBranches, assignedTo, activeStageIds]);
+  }, [dateFrom, dateTo, selectedStages, selectedOutcomes, selectedOrgs, assignedTo, activeStageIds]);
 
   // Initial fetch — needs stageOptions to know active stage IDs
   const initialFetched = useRef(false);
@@ -107,8 +107,8 @@ export default function LeadsHistoryShell({ actor }: Props) {
     let cancelled = false;
     (async () => {
       try {
-        const json = await branchesApi.all();
-        if (!cancelled) setBranches(Array.isArray(json.data) ? json.data as BranchOption[] : []);
+        const json = await orgsApi.all();
+        if (!cancelled) setOrgs(Array.isArray(json.data) ? json.data as OrgOption[] : []);
       } catch { /* ignore */ }
     })();
     return () => { cancelled = true; };
@@ -162,7 +162,7 @@ export default function LeadsHistoryShell({ actor }: Props) {
     setDateTo(today());
     setSelectedStages([]);
     setSelectedOutcomes([]);
-    setSelectedBranches([]);
+    setSelectedOrgs([]);
     setAssignedTo('');
     fetchData({ page: 1, page_size: pageSize, date_from: defaultDateFrom(), date_to: today(), active_only: true });
   };
@@ -211,16 +211,16 @@ export default function LeadsHistoryShell({ actor }: Props) {
             />
           </FilterField>
 
-          {branches.length > 1 && (
-            <FilterField label="Branch">
+          {orgs.length > 1 && (
+            <FilterField label="Org">
               <select
-                value={selectedBranches[0] ?? ''}
-                onChange={(e) => setSelectedBranches(e.target.value ? [e.target.value] : [])}
+                value={selectedOrgs[0] ?? ''}
+                onChange={(e) => setSelectedOrgs(e.target.value ? [e.target.value] : [])}
                 className={inputCls}
               >
-                <option value="">All branches</option>
-                {branches.map((b) => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
+                <option value="">All orgs</option>
+                {orgs.map((o) => (
+                  <option key={o.id} value={o.id}>{o.name}</option>
                 ))}
               </select>
             </FilterField>

@@ -1,5 +1,5 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
-import type { CreateUserInput, UpdateUserInput, ResetPasswordInput } from '@crm/validation';
+import type { CreateUserInput, UpdateUserInput, ResetPasswordInput, UpdateAssignmentWeightsInput } from '@crm/validation';
 import { RANKS } from '@crm/permissions';
 import { ForbiddenError } from '../../../lib/errors.js';
 import * as service from './users.service.js';
@@ -24,6 +24,20 @@ export class UsersController {
     const { org_id, user_id, role, tenant_id, rank } = request.auth;
     const users = await service.getAssignableUsers({ org_id, user_id, role, tenant_id }, rank);
     return reply.send({ success: true, data: users });
+  };
+
+  getAssignmentWeights = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { org_id, user_id, role, tenant_id } = request.auth;
+    const weights = await service.getAssignmentWeights({ org_id, user_id, role, tenant_id });
+    return reply.send({ success: true, data: weights });
+  };
+
+  updateAssignmentWeights = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { org_id, user_id, role, tenant_id, rank } = request.auth;
+    if (rank < RANKS.ADMIN) throw new ForbiddenError('Only org admins can manage lead assignment weights');
+    const data = request.body as UpdateAssignmentWeightsInput;
+    await service.updateAssignmentWeights({ org_id, user_id, role, tenant_id }, data.weights);
+    return reply.status(204).send();
   };
 
   getTeam = async (request: FastifyRequest, reply: FastifyReply) => {

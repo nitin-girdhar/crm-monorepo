@@ -18,7 +18,7 @@ const USER_EXPORT_COLUMNS: ExportColumn<SessionUser>[] = [
   { header: 'Name', value: (u) => u.name ?? '' },
   { header: 'Role', value: (u) => u.role_label ?? ROLE_LABELS[u.role] ?? '' },
   { header: 'Email', value: (u) => u.email },
-  { header: 'Branch', value: (u) => u.org_name ?? '' },
+  { header: 'Org', value: (u) => u.org_name ?? '' },
   { header: 'Manager', value: (u) => u.manager_name ?? '' },
   { header: 'Status', value: (u) => (u.is_active ? 'Active' : 'Inactive') },
   { header: 'Last Login', value: (u) => u.last_login_at ?? '' },
@@ -113,7 +113,7 @@ export default function UsersTable({ users, currentUserId, actorRank, onEdit }: 
             <tr>
               <th className="px-4 py-2.5">Name</th>
               <th className="px-4 py-2.5">Email</th>
-              <th className="px-4 py-2.5">Branch</th>
+              <th className="px-4 py-2.5">Org</th>
               <th className="px-4 py-2.5">Manager</th>
               <th className="px-4 py-2.5">Status</th>
               <th className="px-4 py-2.5 text-right">Actions</th>
