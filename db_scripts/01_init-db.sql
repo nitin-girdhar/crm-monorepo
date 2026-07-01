@@ -632,6 +632,52 @@ CREATE POLICY tenant_isolation_policy ON crm.lead_links
 GRANT SELECT, INSERT, UPDATE ON crm.lead_links TO app_user;
 GRANT ALL PRIVILEGES          ON crm.lead_links TO crm_service;
 
+-- ── ORG_API_KEYS ───────────────────────────────────────────────────
+-- Per-org API keys for public-facing integrations (website lead forms).
+-- Callers authenticate with the plaintext key; only SHA-256 hash is stored.
+CREATE TABLE IF NOT EXISTS crm.org_api_keys (
+  id          UUID         NOT NULL DEFAULT gen_uuidv7() PRIMARY KEY,
+  org_id      UUID         NOT NULL REFERENCES entity.organizations(id) ON DELETE CASCADE,
+  key_hash    TEXT         NOT NULL UNIQUE,     -- SHA-256 hex of the actual key; never store plaintext
+  label       VARCHAR(100) NOT NULL,            -- human-readable name, e.g. "Website contact form"
+  is_active   BOOLEAN      NOT NULL DEFAULT TRUE,
+  created_by  UUID         REFERENCES iam.users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+DROP TRIGGER IF EXISTS trg_org_api_keys_updated_at ON crm.org_api_keys;
+CREATE TRIGGER trg_org_api_keys_updated_at
+  BEFORE UPDATE ON crm.org_api_keys FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+CREATE INDEX IF NOT EXISTS idx_org_api_keys_org_id   ON crm.org_api_keys (org_id);
+CREATE INDEX IF NOT EXISTS idx_org_api_keys_key_hash ON crm.org_api_keys (key_hash) WHERE is_active;
+
+ALTER TABLE crm.org_api_keys ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS org_isolation_policy    ON crm.org_api_keys;
+DROP POLICY IF EXISTS tenant_isolation_policy ON crm.org_api_keys;
+
+CREATE POLICY org_isolation_policy ON crm.org_api_keys AS PERMISSIVE FOR ALL TO app_user
+  USING (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid)
+  WITH CHECK (org_id = NULLIF(current_setting('app.current_org_id', true), '')::uuid);
+
+CREATE POLICY tenant_isolation_policy ON crm.org_api_keys AS PERMISSIVE FOR ALL TO tenant_admin
+  USING (org_id IN (
+    SELECT id FROM entity.organizations
+    WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+    AND NOT is_deleted
+  ))
+  WITH CHECK (org_id IN (
+    SELECT id FROM entity.organizations
+    WHERE tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
+    AND NOT is_deleted
+  ));
+
+GRANT SELECT, INSERT, UPDATE ON crm.org_api_keys TO app_user;
+GRANT SELECT, INSERT, UPDATE ON crm.org_api_keys TO tenant_admin;
+GRANT ALL PRIVILEGES          ON crm.org_api_keys TO crm_service;
+
 -- ── LEAD_INTERACTIONS ─────────────────────────────────────────────
 -- Append-only log — no updated_at, no update trigger.
 CREATE TABLE IF NOT EXISTS crm.lead_interactions (

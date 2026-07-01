@@ -10,4 +10,6 @@ export const config = {
   databaseUrl: requireEnv('DATABASE_URL'),
   databaseUrlService: requireEnv('DATABASE_URL_SERVICE'),
   logLevel: process.env['LOG_LEVEL'] ?? 'info',
+  leadsServiceUrl: process.env['LEADS_SERVICE_URL'] ?? 'http://localhost:4003',
+  internalServiceSecret: requireEnv('INTERNAL_SERVICE_SECRET'),
 } as const;

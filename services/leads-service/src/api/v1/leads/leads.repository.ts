@@ -5,6 +5,7 @@ import {
   leadStageTable,
   leadStageOutcomeTable,
   marketingLeadsTable,
+  leadLinksTable,
   leadInteractionsTable,
   interactionTypesTable,
 } from '@crm/db/schema';
@@ -435,6 +436,108 @@ export async function deleteLead(ctx: RoleTxContext, leadId: string, comment: st
       SET is_deleted = TRUE, deleted_at = CLOCK_TIMESTAMP(), deleted_by = ${ctx.user_id}::uuid
       WHERE id = ${leadId} AND org_id = ${ctx.org_id}
     `);
+  });
+}
+
+export async function transferLead(
+  ctx: RoleTxContext,
+  sourceLeadId: string,
+  targetOrgId: string,
+  notes: string | undefined,
+): Promise<{ sourceLeadId: string; newLeadId: string }> {
+  return withRoleTx(ctx, async (tx) => {
+    // Fetch source lead — RLS ensures actor can only see leads in their org
+    const sourceRows = (await tx.execute(sql`
+      SELECT id, org_id, first_name, middle_name, last_name, phone, email,
+             address_line1, address_line2, pincode, city, city_id, state_id,
+             country_id, source_id, campaign_id, tags, metadata, raw_webhook_data
+      FROM crm.marketing_leads
+      WHERE id = ${sourceLeadId}::uuid
+        AND org_id = ${ctx.org_id}::uuid
+        AND NOT is_deleted
+        AND is_active = true
+    `)) as Array<Record<string, unknown>>;
+
+    if (!sourceRows[0]) throw new Error('Lead not found or already inactive');
+    const src = sourceRows[0];
+
+    // Stage lookups
+    const [newStageRow] = await tx
+      .select({ id: leadStageTable.id })
+      .from(leadStageTable)
+      .where(eq(leadStageTable.name, 'new'))
+      .limit(1);
+
+    const [transferredOutStageRow] = await tx
+      .select({ id: leadStageTable.id })
+      .from(leadStageTable)
+      .where(eq(leadStageTable.name, 'transferred_out'))
+      .limit(1);
+
+    if (!newStageRow || !transferredOutStageRow) {
+      throw new Error('Required lead stages not found');
+    }
+
+    const autoAssignedUserId = await resolveAutoAssignedUser(tx, targetOrgId);
+
+    // Insert new lead in the target org — RLS WITH CHECK enforces that
+    // only tenant_admin (or higher) can write to a different org.
+    const [newLead] = await tx
+      .insert(marketingLeadsTable)
+      .values({
+        orgId:         targetOrgId,
+        firstName:     src['first_name'] as string,
+        middleName:    src['middle_name'] as string | null,
+        lastName:      src['last_name'] as string ?? '',
+        phone:         src['phone'] as string | null,
+        email:         src['email'] as string | null,
+        addressLine1:  src['address_line1'] as string | null,
+        addressLine2:  src['address_line2'] as string | null,
+        pincode:       src['pincode'] as string | null,
+        city:          src['city'] as string | null,
+        cityId:        src['city_id'] as number | null,
+        stateId:       src['state_id'] as number | null,
+        countryId:     src['country_id'] as number | null,
+        sourceId:      src['source_id'] as string | null,
+        campaignId:    src['campaign_id'] as string | null,
+        stageId:       newStageRow.id,
+        assignedUserId: autoAssignedUserId,
+        tags:          coerceTags(src['tags']),
+        metadata:      { ...(src['metadata'] as Record<string, unknown> ?? {}), transferred_from: sourceLeadId },
+        rawWebhookData: (src['raw_webhook_data'] as Record<string, unknown> ?? {}),
+        createdBy:     ctx.user_id,
+      })
+      .returning({ id: marketingLeadsTable.id });
+
+    const newLeadId = newLead!.id;
+
+    // Record the transfer link
+    await tx.insert(leadLinksTable).values({
+      sourceLeadId,
+      sourceOrgId: ctx.org_id,
+      destLeadId:  newLeadId,
+      destOrgId:   targetOrgId,
+      linkType:    'transfer',
+      createdBy:   ctx.user_id,
+      notes:       notes ?? null,
+      status:      'completed',
+    });
+
+    // Mark source lead as transferred out
+    await tx
+      .update(marketingLeadsTable)
+      .set({
+        stageId:     transferredOutStageRow.id,
+        isActive:    false,
+        supersededBy: newLeadId,
+        updatedAt:   new Date(),
+      })
+      .where(and(
+        eq(marketingLeadsTable.id, sourceLeadId),
+        eq(marketingLeadsTable.orgId, ctx.org_id),
+      ));
+
+    return { sourceLeadId, newLeadId };
   });
 }
 

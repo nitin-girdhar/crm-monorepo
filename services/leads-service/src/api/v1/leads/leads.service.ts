@@ -87,6 +87,33 @@ export async function updateLead(ctx: RoleTxContext, leadId: string, data: Updat
   }
 }
 
+export async function transferLead(
+  ctx: RoleTxContext,
+  leadId: string,
+  targetOrgId: string,
+  notes: string | undefined,
+) {
+  if (ctx.org_id === targetOrgId) {
+    throw new AppError('Cannot transfer a lead to the same org', 400);
+  }
+
+  const result = await repo.transferLead(ctx, leadId, targetOrgId, notes);
+
+  await logActivity({ action_type: 'lead_transferred', performed_by: ctx.user_id, lead_id: leadId });
+
+  publishEvent('lead:transferred', {
+    source_lead_id: result.sourceLeadId,
+    new_lead_id: result.newLeadId,
+    source_org_id: ctx.org_id,
+    dest_org_id: targetOrgId,
+    org_id: ctx.org_id,
+    tenant_id: ctx.tenant_id,
+    actor_id: ctx.user_id,
+  });
+
+  return result;
+}
+
 export async function deleteLead(ctx: RoleTxContext, leadId: string, comment: string) {
   await repo.deleteLead(ctx, leadId, comment);
   await logActivity({ action_type: 'lead_deleted', performed_by: ctx.user_id, lead_id: leadId });

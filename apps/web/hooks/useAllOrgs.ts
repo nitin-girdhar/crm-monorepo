@@ -3,8 +3,13 @@
 import { useEffect, useState } from 'react';
 import { orgs as orgsApi } from '@/src/lib/api/client';
 
+export interface OrgOption {
+  id: string;
+  name: string;
+}
+
 export function useAllOrgs() {
-  const [orgs, setOrgs] = useState<string[]>([]);
+  const [orgs, setOrgs] = useState<OrgOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -16,9 +21,9 @@ export function useAllOrgs() {
         if (cancelled) return;
         const list = Array.isArray(json.data) ? json.data : [];
         setOrgs(
-          list.map((o) =>
-            typeof o === 'string' ? o : (o as Record<string, unknown>).name as string ?? '',
-          ).filter(Boolean),
+          list
+            .filter((o) => o && typeof o === 'object' && o.id && o.name)
+            .map((o) => ({ id: o.id, name: o.name })),
         );
         setError(null);
       } catch (err) {

@@ -24,10 +24,18 @@ export const createLeadSchema = z.object({
   raw_webhook_data: z.record(z.unknown()).optional(),
   metadata: z.record(z.unknown()).optional(),
   tags: z.array(z.string().max(50)).max(20).optional(),
+  source_lead_id: z.string().uuid().optional(),
 }).refine(
   (d) => Boolean(d.phone ?? d.email),
   { message: 'At least one of phone or email is required' },
 );
+
+export const transferLeadSchema = z.object({
+  target_org_id: z.string().uuid('Invalid target_org_id'),
+  notes: z.string().max(1000).optional(),
+});
+
+export type TransferLeadInput = z.infer<typeof transferLeadSchema>;
 
 export const updateLeadSchema = z.object({
   stage_id: z.string().uuid('Invalid stage_id').optional(),

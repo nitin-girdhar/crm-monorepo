@@ -12,6 +12,7 @@ export interface UserContext {
 
 export interface ProxyOptions {
   forwardCookies?: boolean;
+  extraHeaders?: Record<string, string>;
 }
 
 export async function proxyTo(
@@ -43,6 +44,10 @@ export async function proxyTo(
 
   if (options?.forwardCookies && request.headers['cookie']) {
     forwardHeaders['Cookie'] = request.headers['cookie'] as string;
+  }
+
+  if (options?.extraHeaders) {
+    Object.assign(forwardHeaders, options.extraHeaders);
   }
 
   const method = request.method.toUpperCase();

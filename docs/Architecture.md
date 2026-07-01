@@ -31,7 +31,8 @@ Meta (Facebook) ─→ API Gateway /meta/webhook/:integrationId ─→ meta-conv
 | POST | `/auth/login` | auth |
 | POST | `/auth/logout` | auth |
 | GET | `/auth/me` | auth |
-| POST | `/intake/webhook` (x-api-key) | leads |
+| POST | `/intake/webhook` (x-internal-secret) | leads |
+| POST | `/intake/leads` (x-api-key — org resolved from key) | leads |
 | GET/POST | `/meta/webhook/:integrationId` | meta-conversion-api |
 
 ### Protected (JWT required)
@@ -40,6 +41,7 @@ Meta (Facebook) ─→ API Gateway /meta/webhook/:integrationId ─→ meta-conv
 | POST | `/auth/change-password` | auth |
 | GET/POST | `/leads` | leads |
 | GET/PATCH/DELETE | `/leads/:id` | leads |
+| POST | `/leads/:id/transfer` | leads |
 | GET | `/leads/:id/timeline` | leads |
 | GET/POST | `/leads/:id/interactions` | leads |
 | GET | `/leads/:id/assignment-history` | leads |

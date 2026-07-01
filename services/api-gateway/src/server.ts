@@ -76,6 +76,19 @@ app.post('/intake/webhook', async (req, reply) => {
   return proxyTo(config.leadsServiceUrl, '/api/v1/intake/webhook', req, reply);
 });
 
+// ── Public website lead intake (no JWT — called by website contact forms) ──
+// Requires a per-org API key in X-Api-Key. The leads-service resolves the
+// org_id from the key hash — the body's org_id field is ignored server-side.
+app.post('/intake/leads', async (req, reply) => {
+  const apiKey = (req.headers['x-api-key'] as string | undefined) ?? '';
+  if (!apiKey) {
+    return reply.status(401).send({ error: 'X-Api-Key header is required' });
+  }
+  return proxyTo(config.leadsServiceUrl, '/api/v1/intake/leads', req, reply, undefined, {
+    extraHeaders: { 'X-Api-Key': apiKey },
+  });
+});
+
 // ── Meta webhook (public — called by Meta, no JWT) ──────────────────────────
 // HMAC verification happens inside meta-conversion-api itself (per-org secrets)
 app.get('/meta/webhook/:integrationId', async (req, reply) => {
@@ -118,6 +131,10 @@ app.patch('/leads/:id', { ...withAuth }, async (req, reply) => {
 app.delete('/leads/:id', { ...withAuth }, async (req, reply) => {
   const { id } = req.params as { id: string };
   return proxyTo(config.leadsServiceUrl, `/api/v1/leads/${id}`, req, reply, req.userCtx);
+});
+app.post('/leads/:id/transfer', { ...withAuth }, async (req, reply) => {
+  const { id } = req.params as { id: string };
+  return proxyTo(config.leadsServiceUrl, `/api/v1/leads/${id}/transfer`, req, reply, req.userCtx);
 });
 app.get('/leads/:id/timeline', { ...withAuth }, async (req, reply) => {
   const { id } = req.params as { id: string };

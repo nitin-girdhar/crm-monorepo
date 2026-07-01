@@ -1,7 +1,7 @@
-import { sql, asc, eq } from 'drizzle-orm';
+import { sql, asc } from 'drizzle-orm';
 import { withRoleTx, withServiceTx } from '@crm/db';
 import type { RoleTxContext } from '@crm/db';
-import { organizationsTable, leadSourcesTable } from '@crm/db/schema';
+import { leadSourcesTable } from '@crm/db/schema';
 
 export interface LocationFilter {
   cityIds?:    number[];
@@ -38,19 +38,17 @@ export async function getOrgs(ctx: RoleTxContext, filter: LocationFilter) {
   });
 }
 
-export async function getAllOrgs(ctx: RoleTxContext) {
-  return withRoleTx(ctx, async (tx) => {
-    return tx
-      .select({
-        id:        organizationsTable.id,
-        name:      organizationsTable.name,
-        cityId:    organizationsTable.cityId,
-        stateId:   organizationsTable.stateId,
-        countryId: organizationsTable.countryId,
-      })
-      .from(organizationsTable)
-      .where(eq(organizationsTable.id, ctx.org_id))
-      .orderBy(asc(organizationsTable.name));
+export async function getAllOrgs(ctx: Pick<RoleTxContext, 'org_id'>) {
+  return withServiceTx(async (tx) => {
+    return (await tx.execute(sql`
+      SELECT o.id, o.name
+      FROM entity.organizations o
+      WHERE o.tenant_id = (
+        SELECT tenant_id FROM entity.organizations WHERE id = ${ctx.org_id}::uuid
+      )
+      AND NOT o.is_deleted AND o.is_active
+      ORDER BY o.name
+    `)) as Array<{ id: string; name: string }>;
   });
 }
 

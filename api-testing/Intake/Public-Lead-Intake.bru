@@ -1,0 +1,29 @@
+meta {
+  name: Public Lead Intake (Website API)
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/intake/leads
+  body: json
+  auth: none
+}
+
+headers {
+  x-api-key: {{publicApiKey}}
+}
+
+body:json {
+  {
+    "first_name": "Website",
+    "last_name": "Visitor",
+    "email": "visitor@example.com",
+    "phone": "9876543210",
+    "source": "website",
+    "metadata": {
+      "page": "/contact",
+      "utm_source": "google"
+    }
+  }
+}

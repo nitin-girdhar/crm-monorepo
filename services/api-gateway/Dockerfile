@@ -18,8 +18,8 @@ COPY packages/ packages/
 COPY services/api-gateway/ services/api-gateway/
 RUN pnpm --filter @crm/auth-constants build
 RUN pnpm --filter @crm/types build
-RUN pnpm --filter @crm/db build
 RUN pnpm --filter @crm/permissions build
+RUN pnpm --filter @crm/db build
 RUN pnpm --filter @crm/api-gateway build
 
 FROM node:20-alpine AS runner

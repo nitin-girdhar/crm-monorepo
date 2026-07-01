@@ -1,5 +1,5 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
-import type { CreateLeadInput, UpdateLeadInput, CreateInteractionInput } from '@crm/validation';
+import type { CreateLeadInput, UpdateLeadInput, CreateInteractionInput, TransferLeadInput } from '@crm/validation';
 import { RANKS, getRulesForTenant } from '@crm/permissions';
 import { ForbiddenError, BadRequestError } from '../../../lib/errors.js';
 import * as service from './leads.service.js';
@@ -127,6 +127,14 @@ export class LeadsController {
       },
     );
     return reply.send({ success: true, data: pipeline });
+  };
+
+  transfer = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { org_id, user_id, role, tenant_id } = request.auth;
+    const { id } = request.params as { id: string };
+    const { target_org_id, notes } = request.body as TransferLeadInput;
+    const result = await service.transferLead({ org_id, user_id, role, tenant_id }, id, target_org_id, notes);
+    return reply.status(201).send({ success: true, data: result });
   };
 
   getStageOptions = async (_request: FastifyRequest, reply: FastifyReply) => {

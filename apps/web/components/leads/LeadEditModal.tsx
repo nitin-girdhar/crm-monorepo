@@ -6,6 +6,7 @@ import type { LeadView, SessionUser } from '@crm/types';
 import type { StageOutcome, UpdatePayload } from '@/src/types/leads';
 import { leads as leadsApi } from '@/src/lib/api/client';
 import UserPicker from '@/components/common/UserPicker';
+import TransferOutModal from './TransferOutModal';
 import { CAN_ASSIGN_ROLES } from './constants';
 
 const TERMINATED_STAGES = new Set(['converted', 'unqualified', 'transferred_out']);
@@ -40,6 +41,7 @@ export function LeadEditModal({
   const [outcomeId,      setOutcomeId]      = useState<string | ''>(lead.outcome_id ?? '');
   const [transitionNote, setTransitionNote] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [showTransferModal, setShowTransferModal] = useState(false);
 
   const stageNameToId = useMemo(() => {
     const inv: Record<string, string> = {};
@@ -173,7 +175,7 @@ export function LeadEditModal({
 
   if (typeof document === 'undefined') return null;
 
-  return createPortal(
+  const portal = createPortal(
     <div
       className="fixed inset-0 z-[200] flex items-start justify-center overflow-y-auto bg-black/40 backdrop-blur-[2px] p-4 sm:p-6"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
@@ -297,8 +299,8 @@ export function LeadEditModal({
               )}
             </div>
 
-            {/* Notes — mandatory when any field changes */}
-            {anyFieldChanged && (
+            {/* Notes — mandatory when any field changes (not needed for transfer_out path) */}
+            {anyFieldChanged && selectedStatus !== 'transferred_out' && (
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-semibold uppercase tracking-wide text-[#64748B]">
                   Notes <span className="text-red-500">*</span>
@@ -327,23 +329,43 @@ export function LeadEditModal({
             className="rounded-lg border border-[#E2E8F0] px-4 py-2 text-sm font-semibold text-[#475569] transition-colors hover:bg-[#F8FAFC] disabled:opacity-60">
             Cancel
           </button>
-          <button type="button" onClick={handleSave}
-            disabled={saving || !anyFieldChanged}
-            className="rounded-lg bg-[#0b6cbf] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#0a5fa8] disabled:cursor-not-allowed disabled:opacity-60">
-            {saving ? (
-              <span className="inline-flex items-center gap-1.5">
-                <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                </svg>
-                Saving…
-              </span>
-            ) : 'Save Changes'}
-          </button>
+          {selectedStatus === 'transferred_out' ? (
+            <button type="button" onClick={() => setShowTransferModal(true)}
+              disabled={!statusChanged}
+              className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60">
+              Transfer Lead →
+            </button>
+          ) : (
+            <button type="button" onClick={handleSave}
+              disabled={saving || !anyFieldChanged}
+              className="rounded-lg bg-[#0b6cbf] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#0a5fa8] disabled:cursor-not-allowed disabled:opacity-60">
+              {saving ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                  </svg>
+                  Saving…
+                </span>
+              ) : 'Save Changes'}
+            </button>
+          )}
         </div>
       </div>
     </div>,
     document.body,
+  );
+
+  return (
+    <>
+      {portal}
+      <TransferOutModal
+        open={showTransferModal}
+        onClose={() => setShowTransferModal(false)}
+        lead={lead}
+        onTransferred={() => { onAssignmentChanged(); onClose(); }}
+      />
+    </>
   );
 }
 

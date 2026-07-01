@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
-import { withServiceTx, resolveAutoAssignedUser } from '@crm/db';
+import { withServiceTx } from '@crm/db';
 import { resolveFieldMappings, type FieldMappingsConfig, type ResolvedFieldMappings } from '../config/meta.config.js';
+import { createIntakeLead } from '../lib/internal-leads-client.js';
 
 export interface MetaLeadFieldData {
   name: string;
@@ -24,10 +25,6 @@ export interface SyncLeadResult {
   isDuplicate: boolean;
 }
 
-/**
- * Safely convert a string to BigInt, returning null when the value is
- * not a valid integer representation (e.g. 'unknown', undefined, '').
- */
 function safeBigInt(value: string | undefined | null): bigint | null {
   if (value == null || value === '') return null;
   try {
@@ -121,106 +118,52 @@ export async function syncLeadToDatabase(
   const professional = buildProfessionalPayload(lead.field_data, mappings);
   const demographics = buildDemographicsPayload(lead.field_data, mappings);
 
-  return withServiceTx(async (tx) => {
-    // Dedup: check if this Meta lead was already synced
-    const metaLeadBigId = safeBigInt(lead.id);
-    if (metaLeadBigId === null) {
-      throw new Error(`Invalid Meta lead ID: "${lead.id}" is not a numeric value`);
-    }
+  const metaLeadBigId = safeBigInt(lead.id);
+  if (metaLeadBigId === null) {
+    throw new Error(`Invalid Meta lead ID: "${lead.id}" is not a numeric value`);
+  }
 
-    const existing = await tx.execute(
-      sql`SELECT id, marketing_lead_id FROM ext.meta_leads WHERE meta_lead_id = ${metaLeadBigId} LIMIT 1`,
-    );
-    const existingRows = existing as unknown as Array<{ id: string; marketing_lead_id: string }>;
-    const existingRow = existingRows[0];
+  // Dedup: check if this Meta lead was already synced (fast read-only check)
+  const initialCheck = (await withServiceTx(async (tx) =>
+    tx.execute(sql`SELECT id, marketing_lead_id FROM ext.meta_leads WHERE meta_lead_id = ${metaLeadBigId} LIMIT 1`),
+  )) as unknown as Array<{ id: string; marketing_lead_id: string }>;
 
-    if (existingRow) {
-      return {
-        metaLeadRowId: existingRow.id,
-        marketingLeadId: existingRow.marketing_lead_id,
-        isDuplicate: true,
-      };
-    }
+  if (initialCheck[0]) {
+    return {
+      metaLeadRowId: initialCheck[0].id,
+      marketingLeadId: initialCheck[0].marketing_lead_id,
+      isDuplicate: true,
+    };
+  }
 
-    // Lookup 'new' stage and 'facebook' source
-    const stageResult = await tx.execute(
-      sql`SELECT id FROM crm.lead_stage WHERE name = 'new' LIMIT 1`,
-    );
-    const stageId = (stageResult as unknown as Array<{ id: string }>)[0]?.id;
+  const leadCreatedAt = lead.created_time ? new Date(lead.created_time * 1000) : new Date();
 
-    const sourceResult = await tx.execute(
-      sql`SELECT id FROM crm.lead_sources WHERE name = 'facebook' LIMIT 1`,
-    );
-    const sourceId = (sourceResult as unknown as Array<{ id: string }>)[0]?.id;
+  // Delegate crm.marketing_leads creation to the leads-service intake endpoint.
+  // This is the single canonical path for lead creation — dedup, auto-assign, and
+  // lead_links for superseded leads are all handled there.
+  const intakeResult = await createIntakeLead({
+    org_id: orgId,
+    first_name: contact.firstName ?? '',
+    last_name: contact.lastName ?? '',
+    phone: contact.phone,
+    email: contact.email,
+    source: 'facebook',
+    metadata: { meta_lead_id: lead.id, form_id: lead.form_id, platform: 'facebook' },
+    raw_webhook_data: { field_data: lead.field_data },
+  });
 
-    // Insert into crm.marketing_leads — always insert a new row (never upsert).
-    // If an active lead with the same phone already exists, mark the old row as superseded.
-    const leadCreatedAt = lead.created_time
-      ? new Date(lead.created_time * 1000)
-      : new Date();
+  const marketingLeadId = intakeResult.id;
 
-    // Find existing active lead for this org+phone (if any)
-    const existingLeadResult = contact.phone
-      ? await tx.execute(
-          sql`SELECT id FROM crm.marketing_leads
-              WHERE org_id = ${orgId}::uuid
-                AND phone = ${contact.phone}
-                AND is_active = true
-                AND NOT is_deleted
-              LIMIT 1`,
-        )
-      : ([] as Array<{ id: string }>);
-    const existingLeadId = (existingLeadResult as unknown as Array<{ id: string }>)[0]?.id ?? null;
+  // Insert ext.meta_* tables inside a transaction.
+  // Re-check ext.meta_leads inside the tx to handle concurrent webhook retries.
+  const metaLeadRowId = await withServiceTx(async (tx) => {
+    const concurrencyCheck = (await tx.execute(
+      sql`SELECT id FROM ext.meta_leads WHERE meta_lead_id = ${metaLeadBigId} LIMIT 1`,
+    )) as unknown as Array<{ id: string }>;
 
-    // Mark the old row inactive BEFORE inserting the new one — the unique index on
-    // (org_id, phone) WHERE is_active = true would fire if the old row is still active
-    // at INSERT time, because PostgreSQL checks constraints before the row is written.
-    if (existingLeadId) {
-      await tx.execute(
-        sql`UPDATE crm.marketing_leads
-            SET is_active = false, updated_at = NOW()
-            WHERE id = ${existingLeadId}::uuid`,
-      );
-    }
+    if (concurrencyCheck[0]) return concurrencyCheck[0].id;
 
-    const autoAssignedUserId = await resolveAutoAssignedUser(tx, orgId);
-
-    const marketingLeadResult = await tx.execute(
-      sql`INSERT INTO crm.marketing_leads (
-            org_id, first_name, middle_name, last_name, phone, email,
-            stage_id, source_id, assigned_user_id, metadata, created_at
-          ) VALUES (
-            ${orgId},
-            ${contact.firstName ?? ''},
-            ${null},
-            ${contact.lastName ?? ''},
-            ${contact.phone},
-            ${contact.email},
-            ${stageId ?? null},
-            ${sourceId ?? null},
-            ${autoAssignedUserId},
-            ${JSON.stringify({ meta_lead_id: lead.id, form_id: lead.form_id, platform: 'facebook' })},
-            ${leadCreatedAt.toISOString()}
-          )
-          RETURNING id`,
-    );
-    const marketingLeadId = (marketingLeadResult as unknown as Array<{ id: string }>)[0]!.id;
-
-    // Now point the old row forward to the new one and write the audit record
-    if (existingLeadId) {
-      await tx.execute(
-        sql`UPDATE crm.marketing_leads
-            SET superseded_by = ${marketingLeadId}::uuid, updated_at = NOW()
-            WHERE id = ${existingLeadId}::uuid`,
-      );
-      await tx.execute(
-        sql`INSERT INTO crm.lead_links (source_lead_id, source_org_id, dest_lead_id, dest_org_id, link_type, status)
-            VALUES (${existingLeadId}::uuid, ${orgId}::uuid, ${marketingLeadId}::uuid, ${orgId}::uuid, 'merge', 'completed')`,
-      );
-    }
-
-    // Insert into ext.meta_leads
-    const metaLeadResult = await tx.execute(
+    const metaLeadResult = (await tx.execute(
       sql`INSERT INTO ext.meta_leads (
             org_id, marketing_lead_id, meta_lead_id, form_id, campaign_id, adset_id, ad_id,
             platform, lead_created_at, full_name, first_name, last_name, email, phone,
@@ -236,16 +179,16 @@ export async function syncLeadToDatabase(
             ${JSON.stringify(lead.field_data)}
           )
           RETURNING id`,
-    );
-    const metaLeadRowId = (metaLeadResult as unknown as Array<{ id: string }>)[0]!.id;
+    )) as unknown as Array<{ id: string }>;
 
-    // Insert structured address/professional/demographics extensions when present
+    const rowId = metaLeadResult[0]!.id;
+
     if (hasAnyValue(address)) {
       await tx.execute(
         sql`INSERT INTO ext.meta_lead_addresses (
               meta_lead_id, org_id, street_address, city, state, province, country, postal_code, zip_code
             ) VALUES (
-              ${metaLeadRowId}, ${orgId}, ${address.streetAddress}, ${address.city}, ${address.state},
+              ${rowId}, ${orgId}, ${address.streetAddress}, ${address.city}, ${address.state},
               ${address.province}, ${address.country}, ${address.postalCode}, ${address.zipCode}
             )`,
       );
@@ -256,7 +199,7 @@ export async function syncLeadToDatabase(
         sql`INSERT INTO ext.meta_lead_professional (
               meta_lead_id, org_id, job_title, company_name, work_email, work_phone_number
             ) VALUES (
-              ${metaLeadRowId}, ${orgId}, ${professional.jobTitle}, ${professional.companyName},
+              ${rowId}, ${orgId}, ${professional.jobTitle}, ${professional.companyName},
               ${professional.workEmail}, ${professional.workPhoneNumber}
             )`,
       );
@@ -267,13 +210,12 @@ export async function syncLeadToDatabase(
         sql`INSERT INTO ext.meta_lead_demographics (
               meta_lead_id, org_id, date_of_birth, gender, marital_status, relationship_status, military_status
             ) VALUES (
-              ${metaLeadRowId}, ${orgId}, ${demographics.dateOfBirth}, ${demographics.gender},
+              ${rowId}, ${orgId}, ${demographics.dateOfBirth}, ${demographics.gender},
               ${demographics.maritalStatus}, ${demographics.relationshipStatus}, ${demographics.militaryStatus}
             )`,
       );
     }
 
-    // Insert custom fields for any remaining unmapped data
     const knownKeys = new Set([
       ...Object.values(mappings.contact).flat(),
       ...Object.values(mappings.address).flat(),
@@ -283,16 +225,18 @@ export async function syncLeadToDatabase(
 
     const customFields = lead.field_data
       .filter((f) => !knownKeys.has(f.name) && f.values[0]?.trim())
-      .map((f) => ({ metaLeadId: metaLeadRowId, key: f.name, value: f.values[0]!.trim() }));
+      .map((f) => ({ key: f.name, value: f.values[0]!.trim() }));
 
     for (const cf of customFields) {
       await tx.execute(
         sql`INSERT INTO ext.meta_lead_custom_fields (meta_lead_id, org_id, question_key, question_value)
-            VALUES (${cf.metaLeadId}, ${orgId}, ${cf.key}, ${cf.value})
+            VALUES (${rowId}, ${orgId}, ${cf.key}, ${cf.value})
             ON CONFLICT (meta_lead_id, question_key) DO NOTHING`,
       );
     }
 
-    return { metaLeadRowId, marketingLeadId, isDuplicate: false };
+    return rowId;
   });
+
+  return { metaLeadRowId, marketingLeadId, isDuplicate: false };
 }

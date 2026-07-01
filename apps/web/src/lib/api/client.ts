@@ -130,6 +130,12 @@ export const leads = {
 
   getAssignmentHistory: (id: string) =>
     request<{ success: true; data: unknown[] }>(`/leads/${id}/assignment-history`),
+
+  transfer: (id: string, data: { target_org_id: string; notes?: string }) =>
+    request<{ success: true; data: { sourceLeadId: string; newLeadId: string } }>(`/leads/${id}/transfer`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };
 
 // ── Users ────────────────────────────────────────────────────────────────────
