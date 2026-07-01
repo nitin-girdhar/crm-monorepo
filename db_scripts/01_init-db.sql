@@ -618,18 +618,31 @@ ALTER TABLE crm.lead_links ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS org_isolation_policy    ON crm.lead_links;
 DROP POLICY IF EXISTS tenant_isolation_policy ON crm.lead_links;
 
--- both orgs involved in a link can see the record
+-- both orgs involved in a link can see/write the record
 CREATE POLICY org_isolation_policy ON crm.lead_links
   AS PERMISSIVE FOR ALL TO app_user
-  USING (source_org_id = current_setting('app.org_id')::uuid
-      OR dest_org_id   = current_setting('app.org_id')::uuid);
+  USING (
+    source_org_id = (NULLIF(current_setting('app.current_org_id', true), ''))::uuid
+    OR dest_org_id = (NULLIF(current_setting('app.current_org_id', true), ''))::uuid
+  );
 
 CREATE POLICY tenant_isolation_policy ON crm.lead_links
   AS PERMISSIVE FOR ALL TO tenant_admin
-  USING (source_org_id = current_setting('app.org_id')::uuid
-      OR dest_org_id   = current_setting('app.org_id')::uuid);
+  USING (
+    source_org_id IN (
+      SELECT id FROM entity.organizations
+      WHERE tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), ''))::uuid
+        AND NOT is_deleted
+    )
+    OR dest_org_id IN (
+      SELECT id FROM entity.organizations
+      WHERE tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), ''))::uuid
+        AND NOT is_deleted
+    )
+  );
 
 GRANT SELECT, INSERT, UPDATE ON crm.lead_links TO app_user;
+GRANT SELECT, INSERT, UPDATE ON crm.lead_links TO tenant_admin;
 GRANT ALL PRIVILEGES          ON crm.lead_links TO crm_service;
 
 -- ── ORG_API_KEYS ───────────────────────────────────────────────────
