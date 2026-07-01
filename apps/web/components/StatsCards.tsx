@@ -196,11 +196,11 @@ export default function StatsCards({ stats, leads, requiresFollowupStatuses, act
         <StatCard label="NEW LEADS" count={counts.new} total={total} iconBg="bg-blue-50" iconColor="text-[#0A6BA8]"
           icon={<IconPersonPlus />} filterId="new" activeFilter={activeFilter} onFilterChange={onFilterChange} />
 
-        <StatCard label="CALL ATTEMPTED" count={counts.callAttempted} total={total} iconBg="bg-amber-50" iconColor="text-amber-600"
-          icon={<IconPhone />} filterId="callAttempted" activeFilter={activeFilter} onFilterChange={onFilterChange} />
+        <StatCard label="FOLLOW-UP REQUIRED" count={counts.followUp} total={total} iconBg="bg-orange-50" iconColor="text-orange-500"
+          icon={<IconBell />} filterId="followUp" activeFilter={activeFilter} onFilterChange={onFilterChange} />
 
-        <StatCard label="UNQUALIFIED LEADS" count={counts.unqualified} total={total} iconBg="bg-red-50" iconColor="text-red-500"
-          icon={<IconXCircle />} filterId="unqualified" activeFilter={activeFilter} onFilterChange={onFilterChange} />
+        <StatCard label="CONTACTING" count={counts.callAttempted} total={total} iconBg="bg-amber-50" iconColor="text-amber-600"
+          icon={<IconPhone />} filterId="callAttempted" activeFilter={activeFilter} onFilterChange={onFilterChange} />
 
         <StatCard label="VISIT SCHEDULED" count={counts.visitScheduled} total={total} iconBg="bg-teal-50" iconColor="text-teal-600"
           icon={<IconCalendarCheck />} filterId="visitScheduled" activeFilter={activeFilter} onFilterChange={onFilterChange} />
@@ -208,8 +208,8 @@ export default function StatsCards({ stats, leads, requiresFollowupStatuses, act
         <StatCard label="CONVERTED" count={counts.converted} total={total} iconBg="bg-purple-50" iconColor="text-purple-600"
           icon={<IconTrophy />} filterId="converted" activeFilter={activeFilter} onFilterChange={onFilterChange} />
 
-        <StatCard label="FOLLOW-UP REQUIRED" count={counts.followUp} total={total} iconBg="bg-orange-50" iconColor="text-orange-500"
-          icon={<IconBell />} filterId="followUp" activeFilter={activeFilter} onFilterChange={onFilterChange} />
+        <StatCard label="UNQUALIFIED LEADS" count={counts.unqualified} total={total} iconBg="bg-red-50" iconColor="text-red-500"
+          icon={<IconXCircle />} filterId="unqualified" activeFilter={activeFilter} onFilterChange={onFilterChange} />
 
         {!hideUnassigned && (
           <StatCard label="UNASSIGNED" count={counts.unassigned} total={total} iconBg="bg-slate-50" iconColor="text-slate-500"

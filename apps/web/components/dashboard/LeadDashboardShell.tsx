@@ -9,7 +9,6 @@ import { useRealtimeEvents } from '@/hooks/useRealtimeEvents';
 import { useNotifications } from '@/providers/NotificationProvider';
 import { useLocationFilters } from '@/hooks/useLocationFilters';
 import { useLeadSources } from '@/hooks/useLeadSources';
-import LocationFilters from '@/components/dashboard/LocationFilters';
 import StatsCards from '@/components/StatsCards';
 import LeadsTable from '@/components/LeadsTable';
 import DownloadButton from '@/components/common/DownloadButton';
@@ -36,7 +35,7 @@ export type CardFilter =
 const FILTER_LABELS: Record<CardFilter, string> = {
   all:            'All Leads',
   new:            'New Leads',
-  callAttempted:  'Call Attempted',
+  callAttempted:  'Contacting',
   unqualified:    'Unqualified Leads',
   visitScheduled: 'Visit Scheduled',
   converted:      'Converted',
@@ -182,43 +181,13 @@ export default function LeadDashboardShell({ actor }: Props) {
   const exportableCount = applyLeadFilter(leads, activeFilter, requiresFollowupStatuses).length;
 
   const orgLabel = selectedOrgs.length === 0
-    ? (primaryOrg?.name ?? '—')
+    ? 'All Branches'
     : selectedOrgs.length === 1
       ? selectedOrgs[0].name
       : `${selectedOrgs.length} orgs`;
 
   return (
     <div className="flex w-full flex-1 flex-col bg-[#F8FAFC] lg:min-h-0">
-
-      {/* Location + org filters */}
-      <LocationFilters
-        countries={countries}
-        states={states}
-        cities={cities}
-        selectedCountries={selectedCountries}
-        selectedStates={selectedStates}
-        selectedCities={selectedCities}
-        onCountriesChange={setSelectedCountries}
-        onStatesChange={setSelectedStates}
-        onCitiesChange={setSelectedCities}
-        loadingCountries={loadingCountries}
-        loadingStates={loadingStates}
-        loadingCities={loadingCities}
-        orgs={orgs}
-        selectedOrgs={selectedOrgs}
-        onOrgsChange={setSelectedOrgs}
-        loadingOrgs={orgsLoading}
-        leadSources={leadSources}
-        selectedSources={selectedSources}
-        onSourcesChange={setSelectedSources}
-        loadingSources={sourcesLoading}
-      />
-
-      {orgsError && (
-        <div className="mx-4 mt-2 shrink-0 rounded-lg border border-orange-100 bg-orange-50 px-4 py-2 text-xs text-[#EA580C] sm:mx-5">
-          Could not load orgs: {orgsError}
-        </div>
-      )}
 
       {/* Stats cards */}
       <div className="shrink-0 border-b border-[#E2E8F0] bg-white">

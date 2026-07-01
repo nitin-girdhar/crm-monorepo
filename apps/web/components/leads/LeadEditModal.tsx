@@ -265,8 +265,8 @@ export function LeadEditModal({
                 </select>
               </div>
 
-              {/* Row 2 — Left: Follow-up Due (hidden for terminated stages) */}
-              {!TERMINATED_STAGES.has(selectedStatus) && (
+              {/* Row 2 — Left: Follow-up Due (hidden for terminated stages and New) */}
+              {selectedStatus !== 'new' && !TERMINATED_STAGES.has(selectedStatus) && (
                 <div className="flex flex-col gap-1.5">
                   <label className="text-xs font-semibold uppercase tracking-wide text-[#64748B]">Follow-up Due</label>
                   <input

@@ -112,34 +112,44 @@ ON CONFLICT (name) DO UPDATE SET
 DO $$
 DECLARE
   v_contacting  UUID;
+  v_on_hold     UUID;
   v_qualified   UUID;
   v_converted   UUID;
   v_unqualified UUID;
   v_transferred UUID;
 BEGIN
   SELECT id INTO v_contacting  FROM crm.lead_stage WHERE name = 'contacting';
+  SELECT id INTO v_on_hold     FROM crm.lead_stage WHERE name = 'on_hold';
   SELECT id INTO v_qualified   FROM crm.lead_stage WHERE name = 'qualified';
   SELECT id INTO v_converted   FROM crm.lead_stage WHERE name = 'converted';
   SELECT id INTO v_unqualified FROM crm.lead_stage WHERE name = 'unqualified';
   SELECT id INTO v_transferred FROM crm.lead_stage WHERE name = 'transferred_out';
 
   -- contacting outcomes
+  INSERT INTO crm.lead_stage_outcome (stage_id, name, label, requires_comment, sort_order) VALUES
+    (v_contacting, 'not_connected',   'Not Connected',   FALSE, 1),
+    (v_contacting, 'switch_off',      'Switch Off',      FALSE, 2),
+    (v_contacting, 'not_answered',    'Not Answered',    FALSE, 3),
+    (v_contacting, 'call_back_later', 'Call Back Later', FALSE, 4),
+    (v_contacting, 'other',           'Other',           TRUE,  5)
+  ON CONFLICT (stage_id, name) DO NOTHING;
+
+  -- on_hold outcomes
   INSERT INTO crm.lead_stage_outcome (stage_id, name, label, sort_order) VALUES
-    (v_contacting, 'not_connected',   'Not Connected',   1),
-    (v_contacting, 'switch_off',      'Switch Off',      2),
-    (v_contacting, 'not_answered',    'Not Answered',    3),
-    (v_contacting, 'call_back_later', 'Call Back Later', 4)
+    (v_on_hold, 'on_hold', 'On Hold', 1)
   ON CONFLICT (stage_id, name) DO NOTHING;
 
   -- qualified outcomes
-  INSERT INTO crm.lead_stage_outcome (stage_id, name, label, sort_order) VALUES
-    (v_qualified, 'visit_scheduled', 'Visit Scheduled', 1),
-    (v_qualified, 'visited',         'Visited',         2)
+  INSERT INTO crm.lead_stage_outcome (stage_id, name, label, requires_comment, sort_order) VALUES
+    (v_qualified, 'visit_scheduled', 'Visit Scheduled', FALSE, 1),
+    (v_qualified, 'visited',         'Visited',         FALSE, 2),
+    (v_qualified, 'other',           'Other',           TRUE,  3)
   ON CONFLICT (stage_id, name) DO NOTHING;
 
   -- converted outcomes
-  INSERT INTO crm.lead_stage_outcome (stage_id, name, label, sort_order) VALUES
-    (v_converted, 'membership_sold', 'Membership Sold', 1)
+  INSERT INTO crm.lead_stage_outcome (stage_id, name, label, requires_comment, sort_order) VALUES
+    (v_converted, 'membership_sold', 'Membership Sold', FALSE, 1),
+    (v_converted, 'other',           'Other',           TRUE,  2)
   ON CONFLICT (stage_id, name) DO NOTHING;
 
   -- unqualified outcomes
@@ -155,8 +165,9 @@ BEGIN
   ON CONFLICT (stage_id, name) DO NOTHING;
 
   -- transferred_out outcomes
-  INSERT INTO crm.lead_stage_outcome (stage_id, name, label, sort_order) VALUES
-    (v_transferred, 'transferred_to_other_branch', 'Transferred to Other Branch', 1)
+  INSERT INTO crm.lead_stage_outcome (stage_id, name, label, requires_comment, sort_order) VALUES
+    (v_transferred, 'transferred_to_other_branch', 'Transferred to Other Branch', FALSE, 1),
+    (v_transferred, 'other',                       'Other',                       TRUE,  2)
   ON CONFLICT (stage_id, name) DO NOTHING;
 END;
 $$;

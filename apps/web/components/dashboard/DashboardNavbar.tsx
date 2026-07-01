@@ -30,7 +30,7 @@ export default function DashboardNavbar({ user }: Props) {
         </Link>
         <div className="hidden h-5 w-px shrink-0 bg-[#E2E8F0] sm:block" />
         <span className="hidden text-sm font-bold tracking-tight text-[#0F172A] sm:block">
-          Workspace
+          Fitclass - Lead Management System
         </span>
         <div className="flex-1" />
         <NotificationBell />
